@@ -75,6 +75,8 @@ public sealed class MainForm : Form
     private Label _lblCopyright = null!;
     private NotifyIcon _trayIcon = null!;
     private ContextMenuStrip _trayMenu = null!;
+    private Icon? _windowIcon;
+    private Icon? _trayIconImage;
     private bool _isExiting;
     private bool _listeningStarted;
     private bool _startHiddenToTray = true;
@@ -458,6 +460,18 @@ public sealed class MainForm : Form
 
     private void InitializeTrayIcon()
     {
+        try
+        {
+            _windowIcon = LoadApplicationIcon();
+            _trayIconImage = (Icon)_windowIcon.Clone();
+            Icon = _windowIcon;
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[错误] 加载应用图标失败:" + ex.Message);
+            throw;
+        }
+
         _trayMenu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("打开主界面");
         var exitItem = new ToolStripMenuItem("退出");
@@ -470,11 +484,32 @@ public sealed class MainForm : Form
         _trayIcon = new NotifyIcon
         {
             Text = "局域网对讲机",
-            Icon = SystemIcons.Application,
+            Icon = _trayIconImage,
             ContextMenuStrip = _trayMenu,
             Visible = true
         };
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ShowMainWindow();
+            }
+        };
         _trayIcon.DoubleClick += (_, __) => ShowMainWindow();
+    }
+
+    private static Icon LoadApplicationIcon()
+    {
+        const string ResourceName = "LanPttIntercom.Assets.LanPttIntercom.ico";
+        var assembly = typeof(MainForm).Assembly;
+        using var stream = assembly.GetManifestResourceStream(ResourceName);
+        if (stream == null)
+        {
+            throw new InvalidOperationException("找不到嵌入的应用图标资源:" + ResourceName);
+        }
+
+        using var icon = new Icon(stream);
+        return (Icon)icon.Clone();
     }
 
     private void EnsureListeningStarted()
@@ -497,6 +532,7 @@ public sealed class MainForm : Form
         EnsureListeningStarted();
         ShowInTaskbar = true;
         WindowState = FormWindowState.Normal;
+        base.SetVisibleCore(true);
         Show();
         Activate();
     }
@@ -524,7 +560,10 @@ public sealed class MainForm : Form
                 BeginInvoke(new Action(() =>
                 {
                     EnsureListeningStarted();
-                    HideToTray();
+                    if (_startHiddenToTray && !_isExiting)
+                    {
+                        HideToTray();
+                    }
                 }));
             }
             base.SetVisibleCore(false);
@@ -997,6 +1036,8 @@ public sealed class MainForm : Form
         {
             try { _trayIcon?.Dispose(); } catch { /* ignore */ }
             try { _trayMenu?.Dispose(); } catch { /* ignore */ }
+            try { _trayIconImage?.Dispose(); } catch { /* ignore */ }
+            try { _windowIcon?.Dispose(); } catch { /* ignore */ }
             try { _controller.Dispose(); } catch { /* ignore */ }
         }
         base.Dispose(disposing);

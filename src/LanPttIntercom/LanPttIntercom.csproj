@@ -13,6 +13,7 @@
     <Authors>LanPttIntercom</Authors>
     <Product>&#x5C40;&#x57DF;&#x7F51;&#x5BF9;&#x8BB2;&#x673A;</Product>
     <Description>&#x5C40;&#x57DF;&#x7F51;&#x8BED;&#x97F3;&#x5BF9;&#x8BB2;(&#x6309;&#x4F4F;&#x8BF4;&#x8BDD;)&#x684C;&#x9762;&#x5E94;&#x7528;</Description>
+    <ApplicationIcon>Assets\LanPttIntercom.ico</ApplicationIcon>
     <NeutralLanguage>zh-CN</NeutralLanguage>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <PublishSingleFile>true</PublishSingleFile>
@@ -21,6 +22,10 @@
     <!-- Framework-dependent single-file with SelfContained=false. This has no material size impact today because the app has no native dependencies, but keeps future native dependency extraction behavior explicit. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\LanPttIntercom.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Update="appsettings.example.json">
