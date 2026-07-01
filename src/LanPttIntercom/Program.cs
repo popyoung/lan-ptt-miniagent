@@ -1,0 +1,65 @@
+﻿using System;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace LanPttIntercom;
+
+/// <summary>
+/// Application entry point. Configures global WinForms settings and shows
+/// <see cref="MainForm"/>.
+/// </summary>
+internal static class Program
+{
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        // Capture audio + WinForms controls + UDP are all fine on a single STA thread;
+        // long-running IO happens on background threads inside the audio/network classes.
+        ApplicationConfiguration.Initialize();
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+
+        // Hidden smoke test mode used by build/CI to validate startup without
+        // requiring an interactive desktop. Activated with --smoketest.
+        if (Array.Exists(args, a => string.Equals(a, "--smoketest", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunSmokeTest();
+            return;
+        }
+
+        Application.Run(new MainForm());
+    }
+
+    private static void RunSmokeTest()
+    {
+        // We use the real message loop so the form's BeginInvoke(SafeStartListening)
+        // actually fires. A timer closes the form after a short delay, then we
+        // exit with the form's dialog result code.
+        var form = new MainForm();
+        int exitCode = 0;
+        var closeTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        closeTimer.Tick += (_, __) =>
+        {
+            closeTimer.Stop();
+            try
+            {
+                if (form.IsHandleCreated)
+                {
+                    form.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("SMOKETEST CLOSE FAILED: " + ex);
+                exitCode = 1;
+            }
+        };
+        form.FormClosed += (_, __) =>
+        {
+            try { closeTimer.Dispose(); } catch { /* ignore */ }
+            Application.Exit();
+        };
+        closeTimer.Start();
+        Application.Run(form);
+        Environment.ExitCode = exitCode;
+    }
+}

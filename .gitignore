@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+
+# Local smoke-test scratch files
+smoke.out
+smoke.err
+publish.log
+build.log
+
+# Agent / session state files (not part of the application)
+.minimax-remix/
+.agent_memory.json
+.agent_state.json
+.agent_*.json

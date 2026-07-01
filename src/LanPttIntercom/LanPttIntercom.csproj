@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>LanPttIntercom</RootNamespace>
+    <AssemblyName>LanPttIntercom</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Authors>LanPttIntercom</Authors>
+    <Product>&#x5C40;&#x57DF;&#x7F51;&#x5BF9;&#x8BB2;&#x673A;</Product>
+    <Description>&#x5C40;&#x57DF;&#x7F51;&#x8BED;&#x97F3;&#x5BF9;&#x8BB2;(&#x6309;&#x4F4F;&#x8BF4;&#x8BDD;)&#x684C;&#x9762;&#x5E94;&#x7528;</Description>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.example.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
