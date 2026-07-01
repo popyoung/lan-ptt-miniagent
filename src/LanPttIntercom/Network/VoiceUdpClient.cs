@@ -22,8 +22,9 @@ namespace LanPttIntercom.Network;
 /// [byte 4..7]= timestamp ms (big-endian, audio only)
 /// [byte 8..N]= PCM payload (audio only)
 /// </code>
-/// <para>The receiver filters out its own packets (matching the bound local
-/// endpoint) and only feeds remote frames to the playback queue.</para>
+/// <para>The receiver filters out packets from non-loopback local LAN
+/// addresses, but accepts loopback packets so a single instance can self-test
+/// with target 127.0.0.1.</para>
 /// </remarks>
 public sealed class VoiceUdpClient : IDisposable
 {
@@ -202,14 +203,7 @@ public sealed class VoiceUdpClient : IDisposable
             if (data == null || data.Length < HeaderSize) continue;
             if (remote == null) continue;
 
-            // Filter out loopback (our own sent packets).
-            if (IPAddress.IsLoopback(remote.Address))
-            {
-                // Accept loopback only if the source port differs from our bound port;
-                // this still counts as "ours" in practice.
-                continue;
-            }
-            if (IsLocalAddress(remote.Address))
+            if (ShouldDropPacketFrom(remote.Address))
             {
                 continue;
             }
@@ -234,18 +228,30 @@ public sealed class VoiceUdpClient : IDisposable
         }
     }
 
-    private static bool IsLocalAddress(IPAddress remote)
+    internal static bool ShouldDropPacketFrom(IPAddress remote)
+    {
+        return ShouldDropPacketFrom(remote, GetLocalAddresses());
+    }
+
+    internal static bool ShouldDropPacketFrom(IPAddress remote, IEnumerable<IPAddress> localAddresses)
+    {
+        if (IPAddress.IsLoopback(remote)) return false;
+        foreach (var addr in localAddresses)
+        {
+            if (addr.Equals(remote)) return true;
+        }
+        return false;
+    }
+
+    private static IReadOnlyList<IPAddress> GetLocalAddresses()
     {
         try
         {
             var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var addr in host.AddressList)
-            {
-                if (addr.Equals(remote)) return true;
-            }
+            return host.AddressList;
         }
         catch { /* ignore */ }
-        return false;
+        return Array.Empty<IPAddress>();
     }
 
     public void Dispose()

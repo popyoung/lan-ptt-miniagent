@@ -352,7 +352,7 @@ public sealed class MmsAudioPlayback : IDisposable
 
     /// <summary>
     /// If a slot is free and a frame is queued, copy the frame into the slot's
-    /// PCM buffer, reset dwFlags on the WAVEHDR, and submit it. Uses the same
+    /// PCM buffer, update dwFlags on the WAVEHDR, and submit it. Uses the same
     /// unmanaged header pointer across the lifetime of the slot.
     /// </summary>
 #pragma warning disable CS0420  // Volatile semantics apply to the InUse field access via Volatile.Read/Write.
@@ -387,16 +387,17 @@ public sealed class MmsAudioPlayback : IDisposable
                 Marshal.Copy(frame, 0, s.DataPtr, copyLen);
             }
 
-            // Update the unmanaged WAVEHDR in place. Reset dwFlags to clear
-            // WHDR_DONE (0x04) and WHDR_INQUEUE (0x10) so the driver treats
-            // this as a fresh buffer.
+            // Update the unmanaged WAVEHDR in place. Keep WHDR_PREPARED
+            // (0x02), and clear only WHDR_DONE (0x01) / WHDR_INQUEUE (0x10)
+            // so the driver treats this as a fresh prepared buffer.
+            var existing = Marshal.PtrToStructure<WAVEHDR>(s.HeaderPtr);
             var hdr = new WAVEHDR
             {
                 lpData = s.DataPtr,
                 dwBufferLength = (uint)copyLen,
                 dwBytesRecorded = 0,
                 dwUser = IntPtr.Zero,
-                dwFlags = 0,
+                dwFlags = PrepareHeaderFlagsForSubmit(existing.dwFlags),
                 dwLoops = 0,
                 lpNext = IntPtr.Zero,
                 reserved = IntPtr.Zero
@@ -464,6 +465,13 @@ public sealed class MmsAudioPlayback : IDisposable
 
     private const int WAVE_FORMAT_PCM = 0x0001;
     private const int CALLBACK_FUNCTION = 0x00030000;
+    private const uint WHDR_DONE = 0x00000001;
+    private const uint WHDR_INQUEUE = 0x00000010;
+
+    internal static uint PrepareHeaderFlagsForSubmit(uint currentFlags)
+    {
+        return currentFlags & ~(WHDR_DONE | WHDR_INQUEUE);
+    }
 
     private delegate void WaveOutProc(IntPtr hwo, uint uMsg, IntPtr dwInstance, IntPtr dwParam1, IntPtr dwParam2);
 

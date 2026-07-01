@@ -1,6 +1,8 @@
+using System.Net;
 using System.Text.Json;
 using LanPttIntercom.Audio;
 using LanPttIntercom.Models;
+using LanPttIntercom.Network;
 using LanPttIntercom.Storage;
 
 var tests = new (string Name, Action Run)[]
@@ -14,6 +16,9 @@ var tests = new (string Name, Action Run)[]
     ("VoiceEnhancer matches sample rate and strength changes", VoiceEnhancerMatchesSampleRateAndStrengthChanges),
     ("Pcm16Frame applies output volume percentage", Pcm16FrameAppliesOutputVolume),
     ("Pcm16Frame applies output volume in place", Pcm16FrameAppliesOutputVolumeInPlace),
+    ("MmsAudioPlayback keeps WAVEHDR prepared flag for submit", MmsAudioPlaybackKeepsPreparedFlagForSubmit),
+    ("MmsAudioCapture keeps WAVEHDR prepared flag for reuse", MmsAudioCaptureKeepsPreparedFlagForReuse),
+    ("VoiceUdpClient allows loopback but filters local LAN packets", VoiceUdpClientAllowsLoopbackButFiltersLocalLanPackets),
     ("TransmitStateGate transitions atomically under contention", TransmitStateGateTransitionsAtomically)
 };
 
@@ -227,6 +232,48 @@ static void Pcm16FrameAppliesOutputVolumeInPlace()
     Pcm16Frame.ApplyVolumeInPlace(input, 100);
     AssertEqual(6000, BitConverter.ToInt16(input, 0), "100 percent keeps first in-place sample");
     AssertEqual(-4000, BitConverter.ToInt16(input, 2), "100 percent keeps second in-place sample");
+}
+
+static void MmsAudioPlaybackKeepsPreparedFlagForSubmit()
+{
+    const uint whdrDone = 0x00000001;
+    const uint whdrPrepared = 0x00000002;
+    const uint whdrBeginLoop = 0x00000004;
+    const uint whdrInQueue = 0x00000010;
+
+    var flags = MmsAudioPlayback.PrepareHeaderFlagsForSubmit(whdrDone | whdrPrepared | whdrBeginLoop | whdrInQueue);
+
+    Assert((flags & whdrPrepared) != 0, "submit flags lost WHDR_PREPARED");
+    Assert((flags & whdrDone) == 0, "submit flags kept WHDR_DONE");
+    Assert((flags & whdrInQueue) == 0, "submit flags kept WHDR_INQUEUE");
+    Assert((flags & whdrBeginLoop) != 0, "submit flags should not clear unrelated flags");
+}
+
+static void MmsAudioCaptureKeepsPreparedFlagForReuse()
+{
+    const uint whdrDone = 0x00000001;
+    const uint whdrPrepared = 0x00000002;
+    const uint whdrBeginLoop = 0x00000004;
+    const uint whdrInQueue = 0x00000010;
+
+    var flags = MmsAudioCapture.PrepareHeaderFlagsForReuse(whdrDone | whdrPrepared | whdrBeginLoop | whdrInQueue);
+
+    Assert((flags & whdrPrepared) != 0, "reuse flags lost WHDR_PREPARED");
+    Assert((flags & whdrDone) == 0, "reuse flags kept WHDR_DONE");
+    Assert((flags & whdrInQueue) == 0, "reuse flags kept WHDR_INQUEUE");
+    Assert((flags & whdrBeginLoop) != 0, "reuse flags should not clear WHDR_BEGINLOOP");
+}
+
+static void VoiceUdpClientAllowsLoopbackButFiltersLocalLanPackets()
+{
+    var localLan = IPAddress.Parse("192.168.1.20");
+    var otherLan = IPAddress.Parse("192.168.1.21");
+    var localAddresses = new[] { localLan };
+
+    Assert(!VoiceUdpClient.ShouldDropPacketFrom(IPAddress.Loopback, localAddresses), "IPv4 loopback should be accepted for self-test");
+    Assert(!VoiceUdpClient.ShouldDropPacketFrom(IPAddress.IPv6Loopback, localAddresses), "IPv6 loopback should be accepted for self-test");
+    Assert(VoiceUdpClient.ShouldDropPacketFrom(localLan, localAddresses), "non-loopback local LAN address should still be filtered");
+    Assert(!VoiceUdpClient.ShouldDropPacketFrom(otherLan, localAddresses), "remote LAN peer should be accepted");
 }
 
 static void TransmitStateGateTransitionsAtomically()

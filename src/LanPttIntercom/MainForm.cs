@@ -63,6 +63,7 @@ public sealed class MainForm : Form
     private ComboBox _cmbInput = null!;
     private Label _lblOutput = null!;
     private ComboBox _cmbOutput = null!;
+    private TableLayoutPanel _audioSettingsLayout = null!;
     private Label _lblVolume = null!;
     private TrackBar _trkVolume = null!;
     private CheckBox _chkEnhancement = null!;
@@ -107,9 +108,10 @@ public sealed class MainForm : Form
     {
         Text = "局域网对讲机 - 按住说话";
         Width = 760;
-        Height = 700;
-        MinimumSize = new Size(700, 640);
+        Height = 780;
+        MinimumSize = new Size(700, 760);
         StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         KeyPreview = true;
         DoubleBuffered = true;
@@ -234,19 +236,45 @@ public sealed class MainForm : Form
             ForeColor = Color.DimGray
         };
 
-        // Audio device pickers
-        _lblInput = new Label { Text = "麦克风:", Left = 16, Top = 408, Width = 70, AutoSize = false };
-        _cmbInput = new ComboBox { Left = 86, Top = 405, Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
-        _lblOutput = new Label { Text = "扬声器:", Left = 360, Top = 408, Width = 70, AutoSize = false };
-        _cmbOutput = new ComboBox { Left = 430, Top = 405, Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
-        _btnRestartAudio = new Button { Text = "应用音频设置", Left = 660, Top = 404, Width = 90, Height = 28 };
+        // Audio settings are grouped in a table so DPI/font scaling cannot
+        // make the TrackBar rows overlap each other.
+        _audioSettingsLayout = new TableLayoutPanel
+        {
+            Left = 16,
+            Top = 402,
+            Width = 720,
+            Height = 130,
+            ColumnCount = 6,
+            RowCount = 3,
+            AutoSize = false,
+            GrowStyle = TableLayoutPanelGrowStyle.FixedSize,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            Margin = new Padding(0),
+            Padding = new Padding(0)
+        };
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70F));
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70F));
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 12F));
+        _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+        _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
 
-        _lblVolume = new Label { Text = "音量:", Left = 16, Top = 444, Width = 70, AutoSize = false };
+        _lblInput = new Label { Text = "麦克风:", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
+        _cmbInput = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 14, 4) };
+        _lblOutput = new Label { Text = "扬声器:", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
+        _cmbOutput = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 8, 4) };
+        _btnRestartAudio = new Button { Text = "应用音频设置", Dock = DockStyle.Fill, Margin = new Padding(0, 3, 0, 5) };
+
+        _lblVolume = new Label { Text = "音量:", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
         _trkVolume = new TrackBar
         {
-            Left = 86,
-            Top = 440,
-            Width = 524,
+            Dock = DockStyle.Fill,
+            Height = 36,
+            AutoSize = false,
+            Margin = new Padding(0, 2, 0, 2),
             Minimum = 0,
             Maximum = 100,
             TickFrequency = 10,
@@ -256,18 +284,17 @@ public sealed class MainForm : Form
         _chkEnhancement = new CheckBox
         {
             Text = "启用麦克风语音增强",
-            Left = 16,
-            Top = 472,
-            Width = 170,
-            Height = 24,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
             Checked = _settings.Audio.Enhancement.Enabled
         };
-        _lblEnhanceStrength = new Label { Text = "强度:", Left = 196, Top = 476, Width = 48, AutoSize = false };
+        _lblEnhanceStrength = new Label { Text = "强度:", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
         _trkEnhancement = new TrackBar
         {
-            Left = 244,
-            Top = 468,
-            Width = 300,
+            Dock = DockStyle.Fill,
+            Height = 36,
+            AutoSize = false,
+            Margin = new Padding(0, 2, 0, 2),
             Minimum = 0,
             Maximum = 100,
             TickFrequency = 25,
@@ -276,19 +303,32 @@ public sealed class MainForm : Form
         _lblEnhanceValue = new Label
         {
             Text = _trkEnhancement.Value.ToString(),
-            Left = 550,
-            Top = 476,
-            Width = 60,
-            AutoSize = false,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray
         };
+        _audioSettingsLayout.Controls.Add(_lblInput, 0, 0);
+        _audioSettingsLayout.Controls.Add(_cmbInput, 1, 0);
+        _audioSettingsLayout.Controls.Add(_lblOutput, 2, 0);
+        _audioSettingsLayout.Controls.Add(_cmbOutput, 3, 0);
+        _audioSettingsLayout.Controls.Add(_btnRestartAudio, 5, 0);
+        _audioSettingsLayout.Controls.Add(_lblVolume, 0, 1);
+        _audioSettingsLayout.Controls.Add(_trkVolume, 1, 1);
+        _audioSettingsLayout.SetColumnSpan(_trkVolume, 5);
+        _audioSettingsLayout.Controls.Add(_chkEnhancement, 0, 2);
+        _audioSettingsLayout.SetColumnSpan(_chkEnhancement, 2);
+        _audioSettingsLayout.Controls.Add(_lblEnhanceStrength, 2, 2);
+        _audioSettingsLayout.Controls.Add(_trkEnhancement, 3, 2);
+        _audioSettingsLayout.SetColumnSpan(_trkEnhancement, 2);
+        _audioSettingsLayout.Controls.Add(_lblEnhanceValue, 5, 2);
 
         // Log
-        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 512, Width = 100, AutoSize = false };
+        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 542, Width = 100, AutoSize = false };
         _lstLog = new ListBox
         {
             Left = 16,
-            Top = 534,
+            Top = 564,
             Width = 720,
             Height = 92,
             IntegralHeight = false,
@@ -299,7 +339,7 @@ public sealed class MainForm : Form
         {
             Text = "局域网对讲机 v1.0  ·  本程序仅在同一局域网内通信",
             Left = 16,
-            Top = 632,
+            Top = 668,
             Width = 720,
             AutoSize = false,
             ForeColor = Color.Gray
@@ -313,9 +353,7 @@ public sealed class MainForm : Form
             _lblSavedList, _lvEndpoints,
             _btnAdd, _btnEdit, _btnDelete, _btnSetDefault, _btnLoadSelected,
             _btnPtt, _chkPttKey, _lblRemoteStatus, _lblRemoteStatusValue,
-            _lblInput, _cmbInput, _lblOutput, _cmbOutput, _btnRestartAudio,
-            _lblVolume, _trkVolume,
-            _chkEnhancement, _lblEnhanceStrength, _trkEnhancement, _lblEnhanceValue,
+            _audioSettingsLayout,
             _lblLog, _lstLog,
             _lblCopyright
         });

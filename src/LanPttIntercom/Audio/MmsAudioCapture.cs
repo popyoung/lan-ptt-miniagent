@@ -393,10 +393,10 @@ public sealed class MmsAudioCapture : IDisposable
                 Marshal.Copy(header.lpData, frame, 0, len);
             }
 
-            // Reset dwBytesRecorded and clear WHDR_DONE for the next round-trip.
+            // Reset dwBytesRecorded and clear transient WinMM flags for the next round-trip.
+            // WHDR_PREPARED must remain set after waveInPrepareHeader.
             header.dwBytesRecorded = 0;
-            // WHDR_DONE = 0x04; clear it.
-            header.dwFlags = header.dwFlags & ~0x04u;
+            header.dwFlags = PrepareHeaderFlagsForReuse(header.dwFlags);
             Marshal.StructureToPtr(header, dwParam1, false);
 
             // Enqueue for the consumer thread. Non-blocking: if the queue is
@@ -456,6 +456,17 @@ public sealed class MmsAudioCapture : IDisposable
 
     private const int WAVE_FORMAT_PCM = 0x0001;
     private const int CALLBACK_FUNCTION = 0x00030000;
+    private const uint WHDR_DONE = 0x00000001;
+    private const uint WHDR_PREPARED = 0x00000002;
+    private const uint WHDR_BEGINLOOP = 0x00000004;
+    private const uint WHDR_INQUEUE = 0x00000010;
+
+    internal static uint PrepareHeaderFlagsForReuse(uint currentFlags)
+    {
+        // Preserve WHDR_PREPARED and unrelated flags such as WHDR_BEGINLOOP;
+        // clear only completion/queue state before waveInAddBuffer reuses it.
+        return currentFlags & ~(WHDR_DONE | WHDR_INQUEUE);
+    }
 
     private delegate void WaveInProc(IntPtr hwi, uint uMsg, IntPtr dwInstance, IntPtr dwParam1, IntPtr dwParam2);
 
