@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
+using LanPttIntercom.Storage;
 
 namespace LanPttIntercom;
 
@@ -31,6 +32,19 @@ internal static class Program
 
     private static void RunSmokeTest()
     {
+        try
+        {
+            var store = new SettingsStore();
+            store.Save(store.Load());
+            Console.WriteLine("SMOKETEST SETTINGS PATH: " + store.FilePath);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("SMOKETEST SETTINGS FAILED: " + ex);
+            Environment.ExitCode = 1;
+            return;
+        }
+
         // We use the real message loop so the form's BeginInvoke(SafeStartListening)
         // actually fires. A timer closes the form after a short delay, then we
         // exit with the form's dialog result code.

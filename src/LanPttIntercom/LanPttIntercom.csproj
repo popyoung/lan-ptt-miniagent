@@ -28,4 +28,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NWaves" Version="0.9.6" />
+  </ItemGroup>
+
 </Project>

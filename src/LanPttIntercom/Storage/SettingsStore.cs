@@ -9,9 +9,8 @@ using LanPttIntercom.Models;
 namespace LanPttIntercom.Storage;
 
 /// <summary>
-/// Loads and saves <see cref="AppSettings"/> as JSON under
-/// %APPDATA%\LanPttIntercom\settings.json. Failures fall back to defaults
-/// rather than crashing the app.
+/// Loads and saves <see cref="AppSettings"/> as JSON beside the executable.
+/// Failures fall back to defaults rather than crashing the app.
 /// </summary>
 public sealed class SettingsStore
 {
@@ -25,18 +24,29 @@ public sealed class SettingsStore
     };
 
     private readonly string _filePath;
+    private readonly string _baseDirectory;
     private readonly object _lock = new();
     private string? _lastLoadWarning;
 
     public SettingsStore()
+        : this(AppContext.BaseDirectory)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var dir = Path.Combine(appData, "LanPttIntercom");
-        Directory.CreateDirectory(dir);
-        _filePath = Path.Combine(dir, "settings.json");
+    }
+
+    public SettingsStore(string baseDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+        {
+            throw new ArgumentException("Base directory cannot be empty.", nameof(baseDirectory));
+        }
+
+        _baseDirectory = Path.GetFullPath(baseDirectory);
+        Directory.CreateDirectory(_baseDirectory);
+        _filePath = Path.Combine(_baseDirectory, "settings.json");
     }
 
     public string FilePath => _filePath;
+    public string BaseDirectory => _baseDirectory;
     public string? LastLoadWarning => _lastLoadWarning;
 
     public AppSettings Load()
@@ -59,11 +69,13 @@ public sealed class SettingsStore
                     _lastLoadWarning = backupPath == null
                         ? "设置文件读取失败,已使用默认设置;程序已尝试备份原文件但未成功。原因:文件内容为空或格式不是有效设置。"
                         : "设置文件读取失败,已使用默认设置;原设置文件已尽量备份到 " + backupPath + "。原因:文件内容为空或格式不是有效设置。";
+                    PortableRuntimeLog.Write(_baseDirectory, _lastLoadWarning);
                     return SeedDefaults();
                 }
 
                 // Make sure nested objects exist if the file was hand-edited.
                 loaded.Audio ??= new AudioSettings();
+                loaded.Audio.Enhancement ??= new AudioEnhancementSettings();
                 loaded.Ui ??= new UiSettings();
                 loaded.Endpoints ??= new List<SavedEndpoint>();
 
@@ -72,6 +84,7 @@ public sealed class SettingsStore
                 loaded.Audio.FrameMilliseconds = Clamp(loaded.Audio.FrameMilliseconds, 10, 60);
                 loaded.ListenPort = Clamp(loaded.ListenPort, 1024, 65535);
                 loaded.Ui.OutputVolume = Clamp(loaded.Ui.OutputVolume, 0, 100);
+                loaded.Audio.Enhancement.Strength = Clamp(loaded.Audio.Enhancement.Strength, 0, 100);
                 return loaded;
             }
             catch (Exception ex)
@@ -80,6 +93,7 @@ public sealed class SettingsStore
                 _lastLoadWarning = backupPath == null
                     ? "设置文件读取失败,已使用默认设置;程序已尝试备份原文件但未成功。原因:" + ex.Message
                     : "设置文件读取失败,已使用默认设置;原设置文件已尽量备份到 " + backupPath + "。原因:" + ex.Message;
+                PortableRuntimeLog.Write(_baseDirectory, _lastLoadWarning);
                 return SeedDefaults();
             }
         }
@@ -158,7 +172,7 @@ public sealed class SettingsStore
         {
             ListenPort = 41000,
             Endpoints = new List<SavedEndpoint>(),
-            Audio = new AudioSettings(),
+            Audio = new AudioSettings { Enhancement = new AudioEnhancementSettings() },
             Ui = new UiSettings()
         };
     }

@@ -58,11 +58,23 @@ public sealed class AudioSettings
     /// <summary>Selected output device id. -1 = system default.</summary>
     public int OutputDeviceId { get; set; } = -1;
 
+    /// <summary>Optional low-latency voice enhancement applied before sending microphone audio.</summary>
+    public AudioEnhancementSettings Enhancement { get; set; } = new();
+
     [JsonIgnore]
     public int FrameSamples => SampleRate * FrameMilliseconds / 1000;
 
     [JsonIgnore]
     public int FrameBytes => FrameSamples * Channels * (BitsPerSample / 8);
+}
+
+public sealed class AudioEnhancementSettings
+{
+    /// <summary>Enable NWaves-based microphone processing before UDP send.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Enhancement intensity, 0..100. Higher means stronger RMS lift and gating.</summary>
+    public int Strength { get; set; } = 50;
 }
 
 public sealed class UiSettings

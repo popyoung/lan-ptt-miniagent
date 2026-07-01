@@ -65,6 +65,10 @@ public sealed class MainForm : Form
     private ComboBox _cmbOutput = null!;
     private Label _lblVolume = null!;
     private TrackBar _trkVolume = null!;
+    private CheckBox _chkEnhancement = null!;
+    private Label _lblEnhanceStrength = null!;
+    private TrackBar _trkEnhancement = null!;
+    private Label _lblEnhanceValue = null!;
     private Button _btnRestartAudio = null!;
     private Button _btnShowSettings = null!;
     private Label _lblCopyright = null!;
@@ -103,8 +107,8 @@ public sealed class MainForm : Form
     {
         Text = "局域网对讲机 - 按住说话";
         Width = 760;
-        Height = 640;
-        MinimumSize = new Size(700, 560);
+        Height = 700;
+        MinimumSize = new Size(700, 640);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         KeyPreview = true;
@@ -216,7 +220,7 @@ public sealed class MainForm : Form
         _chkPttKey.CheckedChanged += (_, __) =>
         {
             _settings.Ui.PttKeyEnabled = _chkPttKey.Checked;
-            _store.Save(_settings);
+            TrySaveSettings();
         };
 
         _lblRemoteStatus = new Label { Text = "远端状态:", Left = 510, Top = 372, Width = 80, AutoSize = false };
@@ -249,14 +253,44 @@ public sealed class MainForm : Form
             Value = _settings.Ui.OutputVolume
         };
 
+        _chkEnhancement = new CheckBox
+        {
+            Text = "启用麦克风语音增强",
+            Left = 16,
+            Top = 472,
+            Width = 170,
+            Height = 24,
+            Checked = _settings.Audio.Enhancement.Enabled
+        };
+        _lblEnhanceStrength = new Label { Text = "强度:", Left = 196, Top = 476, Width = 48, AutoSize = false };
+        _trkEnhancement = new TrackBar
+        {
+            Left = 244,
+            Top = 468,
+            Width = 300,
+            Minimum = 0,
+            Maximum = 100,
+            TickFrequency = 25,
+            Value = Math.Clamp(_settings.Audio.Enhancement.Strength, 0, 100)
+        };
+        _lblEnhanceValue = new Label
+        {
+            Text = _trkEnhancement.Value.ToString(),
+            Left = 550,
+            Top = 476,
+            Width = 60,
+            AutoSize = false,
+            ForeColor = Color.DimGray
+        };
+
         // Log
-        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 478, Width = 100, AutoSize = false };
+        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 512, Width = 100, AutoSize = false };
         _lstLog = new ListBox
         {
             Left = 16,
-            Top = 500,
+            Top = 534,
             Width = 720,
-            Height = 90,
+            Height = 92,
             IntegralHeight = false,
             HorizontalScrollbar = true
         };
@@ -265,7 +299,7 @@ public sealed class MainForm : Form
         {
             Text = "局域网对讲机 v1.0  ·  本程序仅在同一局域网内通信",
             Left = 16,
-            Top = 594,
+            Top = 632,
             Width = 720,
             AutoSize = false,
             ForeColor = Color.Gray
@@ -281,6 +315,7 @@ public sealed class MainForm : Form
             _btnPtt, _chkPttKey, _lblRemoteStatus, _lblRemoteStatusValue,
             _lblInput, _cmbInput, _lblOutput, _cmbOutput, _btnRestartAudio,
             _lblVolume, _trkVolume,
+            _chkEnhancement, _lblEnhanceStrength, _trkEnhancement, _lblEnhanceValue,
             _lblLog, _lstLog,
             _lblCopyright
         });
@@ -304,12 +339,26 @@ public sealed class MainForm : Form
         _trkVolume.Scroll += (_, __) =>
         {
             _settings.Ui.OutputVolume = _trkVolume.Value;
-            _store.Save(_settings);
+            TrySaveSettings();
         };
         _numPort.ValueChanged += (_, __) =>
         {
             _settings.ListenPort = (int)_numPort.Value;
-            _store.Save(_settings);
+            TrySaveSettings();
+        };
+        _chkEnhancement.CheckedChanged += (_, __) =>
+        {
+            _settings.Audio.Enhancement.Enabled = _chkEnhancement.Checked;
+            _controller.ResetVoiceEnhancer();
+            UpdateEnhancementControls();
+            TrySaveSettings();
+        };
+        _trkEnhancement.Scroll += (_, __) =>
+        {
+            _settings.Audio.Enhancement.Strength = _trkEnhancement.Value;
+            _controller.ResetVoiceEnhancer();
+            UpdateEnhancementControls();
+            TrySaveSettings();
         };
 
         // Keyboard handling: Space = PTT when chkPttKey is checked.
@@ -323,38 +372,47 @@ public sealed class MainForm : Form
         _controller.ErrorOccurred += msg => AppendLog("[错误] " + msg);
         _controller.TransmitStateChanged += tx =>
         {
-            if (tx)
+            RunOnUi(() =>
             {
-                _btnPtt.BackColor = Color.FromArgb(0xB0, 0x30, 0x30);
-                _btnPtt.Text = "正在发送... 松开停止";
-                _lblConnValue.Text = "正在向 " + (_controller.CurrentTargetIp ?? "?") + " 发送";
-                _lblConnValue.ForeColor = Color.DarkRed;
-            }
-            else
-            {
-                _btnPtt.BackColor = Color.FromArgb(0xE6, 0x4A, 0x4A);
-                _btnPtt.Text = "按住说话(也可以按住 空格 键)";
-                _lblConnValue.Text = "空闲 - 等待按下说话";
-                _lblConnValue.ForeColor = Color.DimGray;
-            }
+                if (tx)
+                {
+                    _btnPtt.BackColor = Color.FromArgb(0xB0, 0x30, 0x30);
+                    _btnPtt.Text = "正在发送... 松开停止";
+                    _lblConnValue.Text = "正在向 " + (_controller.CurrentTargetIp ?? "?") + " 发送";
+                    _lblConnValue.ForeColor = Color.DarkRed;
+                }
+                else
+                {
+                    _btnPtt.BackColor = Color.FromArgb(0xE6, 0x4A, 0x4A);
+                    _btnPtt.Text = "按住说话(也可以按住 空格 键)";
+                    _lblConnValue.Text = "空闲 - 等待按下说话";
+                    _lblConnValue.ForeColor = Color.DimGray;
+                }
+            });
         };
         _controller.RemotePttStateChanged += pressing =>
         {
-            if (pressing)
+            RunOnUi(() =>
             {
-                _lblRemoteStatusValue.Text = "正在说话";
-                _lblRemoteStatusValue.ForeColor = Color.DarkGreen;
-            }
-            else
-            {
-                _lblRemoteStatusValue.Text = "空闲";
-                _lblRemoteStatusValue.ForeColor = Color.DimGray;
-            }
+                if (pressing)
+                {
+                    _lblRemoteStatusValue.Text = "正在说话";
+                    _lblRemoteStatusValue.ForeColor = Color.DarkGreen;
+                }
+                else
+                {
+                    _lblRemoteStatusValue.Text = "空闲";
+                    _lblRemoteStatusValue.ForeColor = Color.DimGray;
+                }
+            });
         };
         _controller.RemoteAudioActiveChanged += ts =>
         {
-            _lblConnValue.Text = "正在接收远端音频";
-            _lblConnValue.ForeColor = Color.DarkGreen;
+            RunOnUi(() =>
+            {
+                _lblConnValue.Text = "正在接收远端音频";
+                _lblConnValue.ForeColor = Color.DarkGreen;
+            });
         };
     }
 
@@ -438,7 +496,10 @@ public sealed class MainForm : Form
         if (_cmbInput.SelectedItem is MmsDeviceInfo inDev) _settings.Audio.InputDeviceId = inDev.DeviceId;
         if (_cmbOutput.SelectedItem is MmsDeviceInfo outDev) _settings.Audio.OutputDeviceId = outDev.DeviceId;
         _settings.Ui.OutputVolume = _trkVolume.Value;
-        _store.Save(_settings);
+        _settings.Audio.Enhancement.Enabled = _chkEnhancement.Checked;
+        _settings.Audio.Enhancement.Strength = _trkEnhancement.Value;
+        if (!TrySaveSettings()) return;
+        _controller.ResetVoiceEnhancer();
 
         try
         {
@@ -506,7 +567,7 @@ public sealed class MainForm : Form
         if (_lvEndpoints.SelectedItems.Count == 0) return;
         var ep = (SavedEndpoint)_lvEndpoints.SelectedItems[0].Tag!;
         _settings.DefaultEndpointId = ep.Id;
-        _store.Save(_settings);
+        if (!TrySaveSettings()) return;
         LoadEndpointsIntoList();
         AppendLog("已将 " + ep.IpAddress + " 设为默认地址");
     }
@@ -551,7 +612,7 @@ public sealed class MainForm : Form
             int idx = _settings.Endpoints.FindIndex(x => x.Id == existing.Id);
             if (idx >= 0) _settings.Endpoints[idx] = existing;
         }
-        _store.Save(_settings);
+        if (!TrySaveSettings()) return;
         LoadEndpointsIntoList();
         AppendLog(existing == null ? "已添加 " + result.IpAddress : "已更新 " + result.IpAddress);
     }
@@ -566,7 +627,7 @@ public sealed class MainForm : Form
         if (confirm != DialogResult.Yes) return;
         if (_settings.DefaultEndpointId == ep.Id) _settings.DefaultEndpointId = null;
         _endpointsBinding.Remove(ep);
-        _store.Save(_settings);
+        if (!TrySaveSettings()) return;
         LoadEndpointsIntoList();
         AppendLog("已删除 " + ep.IpAddress);
     }
@@ -591,6 +652,9 @@ public sealed class MainForm : Form
         _numPort.Value = Math.Clamp(_settings.ListenPort, (int)_numPort.Minimum, (int)_numPort.Maximum);
         _trkVolume.Value = Math.Clamp(_settings.Ui.OutputVolume, _trkVolume.Minimum, _trkVolume.Maximum);
         _chkPttKey.Checked = _settings.Ui.PttKeyEnabled;
+        _chkEnhancement.Checked = _settings.Audio.Enhancement.Enabled;
+        _trkEnhancement.Value = Math.Clamp(_settings.Audio.Enhancement.Strength, _trkEnhancement.Minimum, _trkEnhancement.Maximum);
+        UpdateEnhancementControls();
         if (!string.IsNullOrEmpty(_settings.DefaultEndpointId))
         {
             var ep = _endpointsBinding.FirstOrDefault(e => e.Id == _settings.DefaultEndpointId);
@@ -605,7 +669,7 @@ public sealed class MainForm : Form
             var path = _store.FilePath;
             if (!File.Exists(path))
             {
-                _store.Save(_settings);
+                if (!TrySaveSettings()) return;
             }
             Process.Start(new ProcessStartInfo
             {
@@ -617,6 +681,31 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(this, "无法打开设置文件:" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void UpdateEnhancementControls()
+    {
+        _trkEnhancement.Enabled = _chkEnhancement.Checked;
+        _lblEnhanceStrength.Enabled = _chkEnhancement.Checked;
+        _lblEnhanceValue.Text = _trkEnhancement.Value.ToString();
+        _lblEnhanceValue.ForeColor = _chkEnhancement.Checked ? Color.DarkBlue : Color.DimGray;
+    }
+
+    private bool TrySaveSettings()
+    {
+        try
+        {
+            _store.Save(_settings);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            var message = "保存设置失败:" + ex.Message + "。设置目录:" + _store.BaseDirectory;
+            PortableRuntimeLog.Write(_store.BaseDirectory, message);
+            AppendLog("[错误] " + message);
+            MessageBox.Show(this, message, "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
         }
     }
 
@@ -704,16 +793,44 @@ public sealed class MainForm : Form
         if (e.KeyCode == Keys.Space) e.Handled = true;
     }
 
-    private void AppendLog(string text)
+    private void RunOnUi(Action action)
     {
+        if (IsDisposed) return;
         if (InvokeRequired)
         {
-            BeginInvoke(new Action<string>(AppendLog), text);
+            if (!IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        action();
+                    }
+                }));
+            }
+            catch (ObjectDisposedException)
+            {
+                // Shutdown raced the posted event.
+            }
+            catch (InvalidOperationException)
+            {
+                // The form handle can disappear while a background event is being posted.
+            }
             return;
         }
-        var line = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + text;
-        _lstLog.Items.Insert(0, line);
-        while (_lstLog.Items.Count > 200) _lstLog.Items.RemoveAt(_lstLog.Items.Count - 1);
+
+        action();
+    }
+
+    private void AppendLog(string text)
+    {
+        RunOnUi(() =>
+        {
+            var line = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + text;
+            _lstLog.Items.Insert(0, line);
+            while (_lstLog.Items.Count > 200) _lstLog.Items.RemoveAt(_lstLog.Items.Count - 1);
+        });
     }
 }
 

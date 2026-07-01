@@ -8,6 +8,9 @@ Build a lightweight Windows LAN voice intercom, similar to a push-to-talk walkie
 - Build a Windows desktop application.
 - Target low resource usage.
 - Prefer a single executable output if practical.
+- Keep the application on .NET 6.
+- Use green/portable runtime storage: application settings, failed-setting backups, and necessary logs must stay beside the executable. Do not write runtime state to registry, AppData, user profile, or other directories.
+- Keep the publish shape framework-dependent single-file; do not switch to self-contained publishing.
 
 ## User Interface
 
@@ -41,6 +44,12 @@ Build a lightweight Windows LAN voice intercom, similar to a push-to-talk walkie
 - Saved IP addresses must be deletable.
 - A saved IP address may have a user-editable display name or note.
 - The user can choose one saved IP address to load automatically after the program starts.
+
+## Voice Enhancement
+
+- Provide a persisted microphone voice enhancement switch and strength setting.
+- Implement the enhancement with NWaves, not NAudio, RNNoise, WebRTC native code, or a silent hand-written-DSP fallback.
+- Enhancement applies before sending local microphone PCM16 mono frames. Receiving still respects the output volume setting.
 
 ## Expected Deliverables
 
