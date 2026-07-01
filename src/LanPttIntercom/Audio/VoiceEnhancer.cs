@@ -16,6 +16,8 @@ public sealed class VoiceEnhancer
     private readonly int _strength;
     private readonly NWaves.Filters.BiQuad.HighPassFilter _highPass;
     private readonly DynamicsProcessor _limiter;
+    private byte[] _output = Array.Empty<byte>();
+    private float[] _work = Array.Empty<float>();
 
     public VoiceEnhancer(AudioSettings settings)
     {
@@ -55,11 +57,31 @@ public sealed class VoiceEnhancer
     {
         if (pcm == null) throw new ArgumentNullException(nameof(pcm));
         if (pcm.Length == 0) return Array.Empty<byte>();
-        if ((pcm.Length & 1) != 0) throw new ArgumentException("PCM16 frame length must be even.", nameof(pcm));
 
         var output = new byte[pcm.Length];
+        ProcessPcm16MonoInto(pcm, output);
+        return output;
+    }
+
+    internal byte[] ProcessPcm16MonoReusable(byte[] pcm)
+    {
+        if (pcm == null) throw new ArgumentNullException(nameof(pcm));
+        if (pcm.Length == 0) return Array.Empty<byte>();
+
+        var output = EnsureOutputBuffer(pcm.Length);
+        ProcessPcm16MonoInto(pcm, output);
+        return output;
+    }
+
+    public void ProcessPcm16MonoInto(byte[] pcm, byte[] output)
+    {
+        if (pcm == null) throw new ArgumentNullException(nameof(pcm));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if ((pcm.Length & 1) != 0) throw new ArgumentException("PCM16 frame length must be even.", nameof(pcm));
+        if (output.Length < pcm.Length) throw new ArgumentException("Output buffer is smaller than the PCM frame.", nameof(output));
+
         var samples = pcm.Length / 2;
-        var work = new float[samples];
+        var work = EnsureWorkBuffer(samples);
 
         double rmsSum = 0;
         for (int i = 0; i < samples; i++)
@@ -85,8 +107,6 @@ public sealed class VoiceEnhancer
             output[i * 2] = (byte)(intSample & 0xFF);
             output[i * 2 + 1] = (byte)((intSample >> 8) & 0xFF);
         }
-
-        return output;
     }
 
     public static byte[] ProcessPcm16Mono(byte[] pcm, AudioSettings settings)
@@ -104,5 +124,23 @@ public sealed class VoiceEnhancer
         if (value < min) return min;
         if (value > max) return max;
         return value;
+    }
+
+    private byte[] EnsureOutputBuffer(int bytes)
+    {
+        if (_output.Length != bytes)
+        {
+            _output = new byte[bytes];
+        }
+        return _output;
+    }
+
+    private float[] EnsureWorkBuffer(int samples)
+    {
+        if (_work.Length < samples)
+        {
+            _work = new float[samples];
+        }
+        return _work;
     }
 }

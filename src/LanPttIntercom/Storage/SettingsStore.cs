@@ -142,6 +142,7 @@ public sealed class SettingsStore
             if (string.IsNullOrEmpty(dir)) return null;
             var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
             var backupPath = Path.Combine(dir, "settings.failed-" + stamp + ".json");
+            // Avoid replacing an existing backup; the caller's warning already reports backup failure.
             File.Copy(_filePath, backupPath, overwrite: false);
             return backupPath;
         }

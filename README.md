@@ -61,6 +61,13 @@ dotnet publish src\LanPttIntercom\LanPttIntercom.csproj -c Release -r win-x64 --
 
 "启用麦克风语音增强"只处理本机麦克风发送前的 PCM16 单声道帧,不改变 UDP 协议。处理链使用 NWaves 在线高通滤波器和动态限幅器,再配合保守 RMS 自动增益,用于减少低频/DC 偏移并抬高较小的人声。强度越高,增益和高通截止越明显;默认关闭,打开后默认强度 50。接收端仍会按界面上的"音量"设置缩放播放帧。
 
+## 故障排查
+
+- 如果 `settings.json` 或 `LanPttIntercom.log` 保存失败,检查 `LanPttIntercom.exe` 所在目录是否可写;程序不会改写到 AppData、注册表、用户 profile 或其他目录。
+- 默认发布产物是 framework-dependent single-file,目标机器仍需已有 .NET 6 Desktop Runtime(`Microsoft.WindowsDesktop.App 6.x`)。
+- NWaves 已随应用打进 single-file EXE,不需要单独放置 NWaves DLL;但它不包含 .NET 运行时。
+- 如果听不到对方,优先确认双方在同一局域网/网段、目标 IP 正确、端口一致,并且 Windows 防火墙允许该 UDP 端口通信。
+
 ## 协议说明(简要)
 
 UDP,默认端口 `41000`。每个包由 8 字节头 + PCM 负载组成:

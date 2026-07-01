@@ -182,7 +182,6 @@ public sealed class IntercomController : IDisposable
 
         try
         {
-            byte[] enhanced;
             lock (_voiceEnhancerLock)
             {
                 if (!IsTransmitting) return;
@@ -191,11 +190,10 @@ public sealed class IntercomController : IDisposable
                     _voiceEnhancer = new VoiceEnhancer(_settings.Audio);
                 }
 
-                enhanced = _voiceEnhancer.ProcessPcm16Mono(pcm);
+                var enhanced = _voiceEnhancer.ProcessPcm16MonoReusable(pcm);
+                if (!IsTransmitting) return;
+                _udp.SendAudioFrame(enhanced);
             }
-
-            if (!IsTransmitting) return;
-            _udp.SendAudioFrame(enhanced);
         }
         catch (Exception ex)
         {
@@ -206,7 +204,8 @@ public sealed class IntercomController : IDisposable
 
     private void OnRemoteAudio(byte[] pcm)
     {
-        _playback?.SubmitFrame(Pcm16Frame.ApplyVolume(pcm, _settings.Ui.OutputVolume));
+        Pcm16Frame.ApplyVolumeInPlace(pcm, _settings.Ui.OutputVolume);
+        _playback?.SubmitFrame(pcm);
         var now = DateTime.UtcNow;
         var previous = _lastRemoteAudioAt;
         _lastRemoteAudioAt = now;

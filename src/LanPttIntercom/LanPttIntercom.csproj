@@ -18,6 +18,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Framework-dependent single-file with SelfContained=false. This has no material size impact today because the app has no native dependencies, but keeps future native dependency extraction behavior explicit. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 

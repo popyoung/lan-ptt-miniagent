@@ -9,7 +9,11 @@ var tests = new (string Name, Action Run)[]
     ("SettingsStore saves and backs up only inside configured directory", SettingsStoreUsesConfiguredDirectoryOnly),
     ("VoiceEnhancer bypasses disabled audio enhancement", VoiceEnhancerBypassesDisabledEnhancement),
     ("VoiceEnhancer boosts quiet PCM16 mono voice without clipping", VoiceEnhancerBoostsQuietVoice),
+    ("VoiceEnhancer strength zero keeps RMS conservative", VoiceEnhancerStrengthZeroKeepsRmsConservative),
+    ("VoiceEnhancer rejects non PCM16 mono settings clearly", VoiceEnhancerRejectsNonPcm16MonoClearly),
+    ("VoiceEnhancer matches sample rate and strength changes", VoiceEnhancerMatchesSampleRateAndStrengthChanges),
     ("Pcm16Frame applies output volume percentage", Pcm16FrameAppliesOutputVolume),
+    ("Pcm16Frame applies output volume in place", Pcm16FrameAppliesOutputVolumeInPlace),
     ("TransmitStateGate transitions atomically under contention", TransmitStateGateTransitionsAtomically)
 };
 
@@ -121,6 +125,80 @@ static void VoiceEnhancerBoostsQuietVoice()
     Assert(peak <= 30000, "enhanced frame clipped too aggressively: " + peak);
 }
 
+static void VoiceEnhancerStrengthZeroKeepsRmsConservative()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 0 }
+    };
+    var input = MakeSineFrame(audio.FrameSamples, amplitude: 1200);
+    var output = VoiceEnhancer.ProcessPcm16Mono(input, audio);
+    var before = RmsPcm16(input);
+    var after = RmsPcm16(output);
+
+    Assert(after <= before * 1.5, "strength 0 should stay conservative; before RMS " + before + ", after RMS " + after);
+}
+
+static void VoiceEnhancerRejectsNonPcm16MonoClearly()
+{
+    var stereo = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 2,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50 }
+    };
+    var stereoError = AssertThrows<NotSupportedException>(() => new VoiceEnhancer(stereo), "stereo settings should be rejected");
+    AssertEqual("语音增强只支持 PCM16 单声道音频。", stereoError.Message, "stereo rejection message");
+
+    var eightBit = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 8,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50 }
+    };
+    var bitsError = AssertThrows<NotSupportedException>(() => new VoiceEnhancer(eightBit), "8-bit settings should be rejected");
+    AssertEqual("语音增强只支持 PCM16 单声道音频。", bitsError.Message, "bits rejection message");
+}
+
+static void VoiceEnhancerMatchesSampleRateAndStrengthChanges()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50 }
+    };
+    var enhancer = new VoiceEnhancer(audio);
+
+    Assert(enhancer.Matches(audio), "same settings should match");
+    Assert(!enhancer.Matches(new AudioSettings
+    {
+        SampleRate = 8000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50 }
+    }), "sample rate change should not match");
+    Assert(!enhancer.Matches(new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 60 }
+    }), "strength change should not match");
+}
+
 static void Pcm16FrameAppliesOutputVolume()
 {
     var input = new byte[4];
@@ -134,6 +212,21 @@ static void Pcm16FrameAppliesOutputVolume()
     var muted = Pcm16Frame.ApplyVolume(input, 0);
     AssertEqual(0, BitConverter.ToInt16(muted, 0), "muted first sample");
     AssertEqual(0, BitConverter.ToInt16(muted, 2), "muted second sample");
+}
+
+static void Pcm16FrameAppliesOutputVolumeInPlace()
+{
+    var input = new byte[4];
+    WriteSample(input, 0, 12000);
+    WriteSample(input, 1, -8000);
+
+    Pcm16Frame.ApplyVolumeInPlace(input, 50);
+    AssertEqual(6000, BitConverter.ToInt16(input, 0), "first in-place half-volume sample");
+    AssertEqual(-4000, BitConverter.ToInt16(input, 2), "second in-place half-volume sample");
+
+    Pcm16Frame.ApplyVolumeInPlace(input, 100);
+    AssertEqual(6000, BitConverter.ToInt16(input, 0), "100 percent keeps first in-place sample");
+    AssertEqual(-4000, BitConverter.ToInt16(input, 2), "100 percent keeps second in-place sample");
 }
 
 static void TransmitStateGateTransitionsAtomically()
@@ -215,4 +308,23 @@ static void AssertEqual<T>(T expected, T actual, string message)
     {
         throw new InvalidOperationException(message + ": expected " + expected + ", actual " + actual);
     }
+}
+
+static T AssertThrows<T>(Action action, string message)
+    where T : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (T ex)
+    {
+        return ex;
+    }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException(message + ": expected " + typeof(T).Name + ", actual " + ex.GetType().Name);
+    }
+
+    throw new InvalidOperationException(message + ": expected " + typeof(T).Name + " but no exception was thrown");
 }
