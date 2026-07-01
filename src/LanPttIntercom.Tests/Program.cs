@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text.Json;
+using System.Drawing;
+using LanPttIntercom;
 using LanPttIntercom.Audio;
 using LanPttIntercom.Models;
 using LanPttIntercom.Network;
@@ -20,7 +22,16 @@ var tests = new (string Name, Action Run)[]
     ("MmsAudioPlayback keeps WAVEHDR prepared flag for submit", MmsAudioPlaybackKeepsPreparedFlagForSubmit),
     ("MmsAudioCapture keeps WAVEHDR prepared flag for reuse", MmsAudioCaptureKeepsPreparedFlagForReuse),
     ("VoiceUdpClient allows loopback but filters local LAN packets", VoiceUdpClientAllowsLoopbackButFiltersLocalLanPackets),
-    ("TransmitStateGate transitions atomically under contention", TransmitStateGateTransitionsAtomically)
+    ("TransmitStateGate transitions atomically under contention", TransmitStateGateTransitionsAtomically),
+    ("WindowPlacement moves offscreen bounds into preferred visible work area", WindowPlacementMovesOffscreenBoundsIntoPreferredVisibleWorkArea),
+    ("WindowPlacement falls back when preferred work area is unavailable", WindowPlacementFallsBackWhenPreferredWorkAreaIsUnavailable),
+    ("WindowPlacement moves disconnected negative-coordinate bounds into current screen", WindowPlacementMovesDisconnectedNegativeCoordinateBoundsIntoCurrentScreen),
+    ("WindowPlacement supports negative-coordinate monitors", WindowPlacementSupportsNegativeCoordinateMonitors),
+    ("WindowPlacement preserves partially visible bounds", WindowPlacementPreservesPartiallyVisibleBounds),
+    ("WindowPlacement preserves oversized bounds when visible", WindowPlacementPreservesOversizedBoundsWhenVisible),
+    ("WindowPlacement preserves oversized cross-screen partially visible bounds", WindowPlacementPreservesOversizedCrossScreenPartiallyVisibleBounds),
+    ("WindowPlacement recenters empty bounds into preferred work area", WindowPlacementRecentersEmptyBoundsIntoPreferredWorkArea),
+    ("WindowPlacement expands sub-minimum bounds into current work area", WindowPlacementExpandsSubMinimumBoundsIntoCurrentWorkArea)
 };
 
 var failed = 0;
@@ -332,6 +343,116 @@ static void TransmitStateGateTransitionsAtomically()
 
     AssertEqual(1, stopped, "only one concurrent stop should win");
     Assert(!gate.IsTransmitting, "gate should not be transmitting after winning stop");
+}
+
+static void WindowPlacementMovesOffscreenBoundsIntoPreferredVisibleWorkArea()
+{
+    var preferred = new Rectangle(1920, 0, 1280, 984);
+    var workingAreas = new[]
+    {
+        new Rectangle(0, 0, 1920, 1040),
+        preferred
+    };
+    var offscreen = new Rectangle(-5000, -3000, 760, 780);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(offscreen, workingAreas, minimumSize: new Size(700, 760), preferredWorkingArea: preferred);
+
+    Assert(preferred.Contains(restored), "restored bounds should be contained by preferred work area: " + restored);
+}
+
+static void WindowPlacementFallsBackWhenPreferredWorkAreaIsUnavailable()
+{
+    var fallback = new Rectangle(0, 0, 1920, 1040);
+    var workingAreas = new[]
+    {
+        fallback,
+        new Rectangle(3000, 0, 1280, 984)
+    };
+    var unavailablePreferred = new Rectangle(5000, 5000, 1024, 768);
+    var offscreen = new Rectangle(-5000, -3000, 760, 780);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(offscreen, workingAreas, minimumSize: new Size(700, 760), preferredWorkingArea: unavailablePreferred);
+
+    Assert(fallback.Contains(restored), "restored bounds should use deterministic fallback when preferred is unavailable: " + restored);
+}
+
+static void WindowPlacementMovesDisconnectedNegativeCoordinateBoundsIntoCurrentScreen()
+{
+    var current = new Rectangle(0, 0, 1920, 1040);
+    var oldNegativeMonitorBounds = new Rectangle(-1500, 40, 760, 780);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(oldNegativeMonitorBounds, new[] { current }, minimumSize: new Size(700, 760), preferredWorkingArea: current);
+
+    Assert(current.Contains(restored), "bounds from a disconnected negative-coordinate monitor should move into current screen: " + restored);
+}
+
+static void WindowPlacementSupportsNegativeCoordinateMonitors()
+{
+    var negative = new Rectangle(-1600, 0, 1600, 900);
+    var primary = new Rectangle(0, 0, 1920, 1040);
+    var workingAreas = new[] { primary, negative };
+    var bounds = new Rectangle(-1500, 40, 760, 780);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(bounds, workingAreas, minimumSize: new Size(700, 760), preferredWorkingArea: primary);
+
+    AssertEqual(bounds, restored, "negative-coordinate visible bounds should be preserved");
+}
+
+static void WindowPlacementPreservesPartiallyVisibleBounds()
+{
+    var primary = new Rectangle(0, 0, 1920, 1040);
+    var bounds = new Rectangle(1800, 120, 760, 780);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(bounds, new[] { primary }, minimumSize: new Size(700, 760), preferredWorkingArea: primary);
+
+    AssertEqual(bounds, restored, "partially visible bounds should be preserved");
+}
+
+static void WindowPlacementPreservesOversizedBoundsWhenVisible()
+{
+    var primary = new Rectangle(0, 0, 1024, 700);
+    var oversized = new Rectangle(-100, -50, 1400, 900);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(oversized, new[] { primary }, minimumSize: new Size(700, 760), preferredWorkingArea: primary);
+
+    AssertEqual(oversized, restored, "oversized bounds should be preserved when they intersect a work area");
+}
+
+static void WindowPlacementPreservesOversizedCrossScreenPartiallyVisibleBounds()
+{
+    var primary = new Rectangle(0, 0, 1920, 1040);
+    var secondary = new Rectangle(1920, 0, 1280, 984);
+    var crossScreen = new Rectangle(1700, 20, 2000, 900);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(crossScreen, new[] { primary, secondary }, minimumSize: new Size(700, 760), preferredWorkingArea: primary);
+
+    AssertEqual(crossScreen, restored, "oversized cross-screen bounds should be preserved when partially visible");
+}
+
+static void WindowPlacementRecentersEmptyBoundsIntoPreferredWorkArea()
+{
+    var primary = new Rectangle(0, 0, 1920, 1040);
+    var preferred = new Rectangle(1920, 0, 1280, 984);
+    var minimum = new Size(700, 760);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(Rectangle.Empty, new[] { primary, preferred }, minimum, preferred);
+
+    Assert(preferred.Contains(restored), "empty bounds should be moved into preferred work area: " + restored);
+    AssertEqual(minimum.Width, restored.Width, "empty bounds should expand to minimum width");
+    AssertEqual(minimum.Height, restored.Height, "empty bounds should expand to minimum height");
+}
+
+static void WindowPlacementExpandsSubMinimumBoundsIntoCurrentWorkArea()
+{
+    var current = new Rectangle(0, 0, 500, 400);
+    var minimum = new Size(700, 760);
+    var tiny = new Rectangle(1, 1, 1, 1);
+
+    var restored = WindowPlacement.NormalizeToVisibleWorkArea(tiny, new[] { current }, minimum, current);
+
+    Assert(current.Contains(restored), "sub-minimum bounds should be moved into current work area: " + restored);
+    AssertEqual(current.Width, restored.Width, "sub-minimum width should clamp to small work area width");
+    AssertEqual(current.Height, restored.Height, "sub-minimum height should clamp to small work area height");
 }
 
 static byte[] MakeSineFrame(int samples, short amplitude)

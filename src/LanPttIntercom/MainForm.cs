@@ -6,6 +6,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -20,6 +21,11 @@ namespace LanPttIntercom;
 /// </summary>
 public sealed class MainForm : Form
 {
+    private const int ShowNormal = 1;
+    private const int ShowMaximized = 3;
+    private const int ShowHide = 0;
+    private const int WmNull = 0x0000;
+
     private readonly SettingsStore _store;
     private readonly AppSettings _settings;
     private readonly IntercomController _controller;
@@ -79,8 +85,20 @@ public sealed class MainForm : Form
     private Icon? _trayIconImage;
     private bool _isExiting;
     private bool _listeningStarted;
-    private bool _startHiddenToTray = true;
-    private bool _initialTrayStartupQueued;
+    private bool _suppressRestoreCapture;
+    private FormWindowState _restoreWindowState = FormWindowState.Normal;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     public MainForm()
     {
@@ -519,58 +537,99 @@ public sealed class MainForm : Form
         SafeStartListening();
     }
 
-    private void HideToTray()
+    internal FormWindowState CapturedRestoreWindowStateForSmokeTest => _restoreWindowState;
+
+    internal void StartHiddenToTray()
     {
-        ShowInTaskbar = false;
-        WindowState = FormWindowState.Minimized;
-        Hide();
+        // Establish hidden/taskbar state before listening starts. Startup errors
+        // should surface through tray notifications, not a half-shown window race.
+        _suppressRestoreCapture = true;
+        try
+        {
+            ShowInTaskbar = false;
+            WindowState = FormWindowState.Minimized;
+
+            if (!IsHandleCreated)
+            {
+                CreateHandle();
+            }
+
+            var handle = Handle;
+            if (handle != IntPtr.Zero)
+            {
+                ShowWindow(handle, ShowHide);
+            }
+
+            Hide();
+        }
+        finally
+        {
+            _suppressRestoreCapture = false;
+        }
+        EnsureListeningStarted();
     }
 
-    private void ShowMainWindow()
+    private void HideToTray()
     {
-        _startHiddenToTray = false;
+        _suppressRestoreCapture = true;
+        try
+        {
+            ShowInTaskbar = false;
+            WindowState = FormWindowState.Minimized;
+            Hide();
+        }
+        finally
+        {
+            _suppressRestoreCapture = false;
+        }
+    }
+
+    internal void ShowMainWindow()
+    {
         EnsureListeningStarted();
+        var targetWindowState = _restoreWindowState == FormWindowState.Maximized
+            ? FormWindowState.Maximized
+            : FormWindowState.Normal;
+
         ShowInTaskbar = true;
-        WindowState = FormWindowState.Normal;
-        base.SetVisibleCore(true);
-        Show();
-        Activate();
+        var candidateBounds = Bounds;
+        if (WindowState == FormWindowState.Minimized && RestoreBounds != Rectangle.Empty)
+        {
+            candidateBounds = RestoreBounds;
+        }
+
+        _suppressRestoreCapture = true;
+        try
+        {
+            Show();
+            ActivateForegroundWindow(targetWindowState);
+
+            if (targetWindowState == FormWindowState.Normal)
+            {
+                WindowState = FormWindowState.Normal;
+                Bounds = WindowPlacement.NormalizeToVisibleWorkArea(
+                    candidateBounds,
+                    Screen.AllScreens.Select(screen => screen.WorkingArea),
+                    MinimumSize,
+                    Screen.PrimaryScreen?.WorkingArea);
+            }
+            else
+            {
+                WindowState = FormWindowState.Maximized;
+            }
+        }
+        finally
+        {
+            _suppressRestoreCapture = false;
+        }
     }
 
     internal void ExitApplication()
     {
         if (_isExiting) return;
         _isExiting = true;
-        _startHiddenToTray = false;
         try { _trayIcon.Visible = false; } catch { /* ignore */ }
         Close();
-    }
-
-    protected override void SetVisibleCore(bool value)
-    {
-        if (value && _startHiddenToTray && !_isExiting)
-        {
-            if (!_initialTrayStartupQueued)
-            {
-                _initialTrayStartupQueued = true;
-                if (!IsHandleCreated)
-                {
-                    CreateHandle();
-                }
-                BeginInvoke(new Action(() =>
-                {
-                    EnsureListeningStarted();
-                    if (_startHiddenToTray && !_isExiting)
-                    {
-                        HideToTray();
-                    }
-                }));
-            }
-            base.SetVisibleCore(false);
-            return;
-        }
-
-        base.SetVisibleCore(value);
     }
 
     private void SafeStartListening()
@@ -994,6 +1053,51 @@ public sealed class MainForm : Form
             while (_lstLog.Items.Count > 200) _lstLog.Items.RemoveAt(_lstLog.Items.Count - 1);
             ShowTrayErrorBalloonIfNeeded(text);
         });
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (_suppressRestoreCapture) return;
+        if (WindowState == FormWindowState.Normal || WindowState == FormWindowState.Maximized)
+        {
+            _restoreWindowState = WindowState;
+        }
+    }
+
+    private void ActivateForegroundWindow(FormWindowState targetWindowState)
+    {
+        var handle = Handle;
+        if (handle == IntPtr.Zero) return;
+
+        var foreground = GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            var postedNullMessage = PostMessage(foreground, WmNull, IntPtr.Zero, IntPtr.Zero);
+            TraceWin32ActivationFailure("PostMessage(WM_NULL)", postedNullMessage, foreground);
+        }
+
+        // ShowWindow participates in foreground activation; managed final
+        // WindowState/Bounds are reconciled by ShowMainWindow immediately after.
+        var previouslyVisible = ShowWindow(handle, targetWindowState == FormWindowState.Maximized ? ShowMaximized : ShowNormal);
+        TraceShowWindowResult(previouslyVisible, handle);
+        var setForeground = SetForegroundWindow(handle);
+        TraceWin32ActivationFailure("SetForegroundWindow", setForeground, handle);
+    }
+
+    [Conditional("DEBUG")]
+    private static void TraceShowWindowResult(bool previouslyVisible, IntPtr handle)
+    {
+        Debug.WriteLine("Foreground activation ShowWindow completed for HWND 0x" + handle.ToInt64().ToString("X") +
+                        ", previouslyVisible=" + previouslyVisible);
+    }
+
+    [Conditional("DEBUG")]
+    private static void TraceWin32ActivationFailure(string operation, bool succeeded, IntPtr handle)
+    {
+        if (succeeded) return;
+        Debug.WriteLine("Foreground activation " + operation + " returned false for HWND 0x" + handle.ToInt64().ToString("X") +
+                        ", last Win32 error " + Marshal.GetLastWin32Error());
     }
 
     private void ShowTrayErrorBalloonIfNeeded(string text)
