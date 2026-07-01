@@ -93,10 +93,17 @@ public sealed class VoiceEnhancer
         }
 
         var rms = Math.Sqrt(rmsSum / Math.Max(1, samples));
-        var targetRms = 0.055 + (_strength / 100.0) * 0.070;
-        var gain = rms > 0.00001 ? targetRms / rms : 1.0;
-        var maxGain = 1.4 + (_strength / 100.0) * 3.4;
-        gain = Math.Clamp(gain, 1.0, maxGain);
+        var strength = _strength / 100.0;
+        var targetRms = 0.055 + strength * 0.070;
+        var autoGain = rms > 0.00001 ? targetRms / rms : 1.0;
+        var maxGain = 1.4 + strength * 3.4;
+        autoGain = Math.Clamp(autoGain, 1.0, maxGain);
+
+        // Make high strength audibly different even when the mic is already
+        // near/above target RMS. Clamp the total gain to the existing ceiling
+        // policy so quiet speech enhancement does not become more aggressive.
+        var makeupGain = 1.0 + strength * 0.65;
+        var gain = Math.Clamp(autoGain * makeupGain, 1.0, maxGain);
 
         for (int i = 0; i < samples; i++)
         {

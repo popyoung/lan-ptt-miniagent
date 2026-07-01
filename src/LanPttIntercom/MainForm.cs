@@ -73,6 +73,12 @@ public sealed class MainForm : Form
     private Button _btnRestartAudio = null!;
     private Button _btnShowSettings = null!;
     private Label _lblCopyright = null!;
+    private NotifyIcon _trayIcon = null!;
+    private ContextMenuStrip _trayMenu = null!;
+    private bool _isExiting;
+    private bool _listeningStarted;
+    private bool _startHiddenToTray = true;
+    private bool _initialTrayStartupQueued;
 
     public MainForm()
     {
@@ -91,15 +97,6 @@ public sealed class MainForm : Form
         ApplySettingsToUi();
         WireControllerEvents();
         FormClosing += OnFormClosing;
-        Shown += OnFormShown;
-    }
-
-    private void OnFormShown(object? sender, EventArgs e)
-    {
-        // Start listening automatically on open, per the task spec. We do this
-        // from Shown (not the constructor) so the window handle exists by the
-        // time controller events try to update UI labels.
-        SafeStartListening();
     }
 
     // ---------------- UI construction ----------------
@@ -115,6 +112,8 @@ public sealed class MainForm : Form
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         KeyPreview = true;
         DoubleBuffered = true;
+        ShowInTaskbar = false;
+        WindowState = FormWindowState.Minimized;
 
         // Top row: local status + connection
         _lblLocalStatus = new Label { Text = "本机监听:", Left = 16, Top = 14, Width = 80, AutoSize = false };
@@ -357,6 +356,7 @@ public sealed class MainForm : Form
             _lblLog, _lstLog,
             _lblCopyright
         });
+        InitializeTrayIcon();
 
         // Wire button events
         _btnApplyTarget.Click += (_, __) => ApplyTargetFromTextBox();
@@ -456,6 +456,84 @@ public sealed class MainForm : Form
 
     // ---------------- Lifecycle ----------------
 
+    private void InitializeTrayIcon()
+    {
+        _trayMenu = new ContextMenuStrip();
+        var openItem = new ToolStripMenuItem("打开主界面");
+        var exitItem = new ToolStripMenuItem("退出");
+        openItem.Click += (_, __) => ShowMainWindow();
+        exitItem.Click += (_, __) => ExitApplication();
+        _trayMenu.Items.Add(openItem);
+        _trayMenu.Items.Add(new ToolStripSeparator());
+        _trayMenu.Items.Add(exitItem);
+
+        _trayIcon = new NotifyIcon
+        {
+            Text = "局域网对讲机",
+            Icon = SystemIcons.Application,
+            ContextMenuStrip = _trayMenu,
+            Visible = true
+        };
+        _trayIcon.DoubleClick += (_, __) => ShowMainWindow();
+    }
+
+    private void EnsureListeningStarted()
+    {
+        if (_listeningStarted) return;
+        _listeningStarted = true;
+        SafeStartListening();
+    }
+
+    private void HideToTray()
+    {
+        ShowInTaskbar = false;
+        WindowState = FormWindowState.Minimized;
+        Hide();
+    }
+
+    private void ShowMainWindow()
+    {
+        _startHiddenToTray = false;
+        EnsureListeningStarted();
+        ShowInTaskbar = true;
+        WindowState = FormWindowState.Normal;
+        Show();
+        Activate();
+    }
+
+    internal void ExitApplication()
+    {
+        if (_isExiting) return;
+        _isExiting = true;
+        _startHiddenToTray = false;
+        try { _trayIcon.Visible = false; } catch { /* ignore */ }
+        Close();
+    }
+
+    protected override void SetVisibleCore(bool value)
+    {
+        if (value && _startHiddenToTray && !_isExiting)
+        {
+            if (!_initialTrayStartupQueued)
+            {
+                _initialTrayStartupQueued = true;
+                if (!IsHandleCreated)
+                {
+                    CreateHandle();
+                }
+                BeginInvoke(new Action(() =>
+                {
+                    EnsureListeningStarted();
+                    HideToTray();
+                }));
+            }
+            base.SetVisibleCore(false);
+            return;
+        }
+
+        base.SetVisibleCore(value);
+    }
+
     private void SafeStartListening()
     {
         try
@@ -475,8 +553,15 @@ public sealed class MainForm : Form
         }
     }
 
-    private void OnFormClosing(object? sender, CancelEventArgs e)
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        if (!_isExiting && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            HideToTray();
+            return;
+        }
+
         try
         {
             if (_controller.IsTransmitting) _controller.StopTransmit();
@@ -868,7 +953,53 @@ public sealed class MainForm : Form
             var line = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + text;
             _lstLog.Items.Insert(0, line);
             while (_lstLog.Items.Count > 200) _lstLog.Items.RemoveAt(_lstLog.Items.Count - 1);
+            ShowTrayErrorBalloonIfNeeded(text);
         });
+    }
+
+    private void ShowTrayErrorBalloonIfNeeded(string text)
+    {
+        if (!IsTrayHidden()) return;
+        if (!ShouldShowTrayErrorBalloon(text)) return;
+        try
+        {
+            if (_trayIcon == null || !_trayIcon.Visible) return;
+            var message = text.StartsWith("[错误]", StringComparison.Ordinal)
+                ? text.Substring("[错误]".Length).Trim()
+                : text;
+            if (message.Length > 180)
+            {
+                message = message.Substring(0, 180) + "...";
+            }
+            _trayIcon.ShowBalloonTip(5000, "局域网对讲机错误", message, ToolTipIcon.Error);
+        }
+        catch
+        {
+            // NotifyIcon can be unavailable or disposed during shutdown.
+        }
+    }
+
+    private bool IsTrayHidden()
+    {
+        return !Visible || !ShowInTaskbar || WindowState == FormWindowState.Minimized;
+    }
+
+    private static bool ShouldShowTrayErrorBalloon(string text)
+    {
+        return text.StartsWith("[错误]", StringComparison.Ordinal) ||
+               text.Contains("启动失败", StringComparison.Ordinal) ||
+               (text.Contains("音频", StringComparison.Ordinal) && text.Contains("失败", StringComparison.Ordinal));
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            try { _trayIcon?.Dispose(); } catch { /* ignore */ }
+            try { _trayMenu?.Dispose(); } catch { /* ignore */ }
+            try { _controller.Dispose(); } catch { /* ignore */ }
+        }
+        base.Dispose(disposing);
     }
 }
 

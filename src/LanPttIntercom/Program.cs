@@ -45,9 +45,9 @@ internal static class Program
             return;
         }
 
-        // We use the real message loop so the form's BeginInvoke(SafeStartListening)
-        // actually fires. A timer closes the form after a short delay, then we
-        // exit with the form's dialog result code.
+        // We use the real message loop so the tray/startup path actually runs.
+        // A timer exits through the same explicit-exit path as the tray menu,
+        // avoiding the close-to-tray behavior used for normal window close.
         var form = new MainForm();
         int exitCode = 0;
         var closeTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -56,10 +56,7 @@ internal static class Program
             closeTimer.Stop();
             try
             {
-                if (form.IsHandleCreated)
-                {
-                    form.Close();
-                }
+                form.ExitApplication();
             }
             catch (Exception ex)
             {

@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("VoiceEnhancer bypasses disabled audio enhancement", VoiceEnhancerBypassesDisabledEnhancement),
     ("VoiceEnhancer boosts quiet PCM16 mono voice without clipping", VoiceEnhancerBoostsQuietVoice),
     ("VoiceEnhancer strength zero keeps RMS conservative", VoiceEnhancerStrengthZeroKeepsRmsConservative),
+    ("VoiceEnhancer strength one hundred is louder for medium voice", VoiceEnhancerStrengthOneHundredIsLouderForMediumVoice),
     ("VoiceEnhancer rejects non PCM16 mono settings clearly", VoiceEnhancerRejectsNonPcm16MonoClearly),
     ("VoiceEnhancer matches sample rate and strength changes", VoiceEnhancerMatchesSampleRateAndStrengthChanges),
     ("Pcm16Frame applies output volume percentage", Pcm16FrameAppliesOutputVolume),
@@ -146,6 +147,35 @@ static void VoiceEnhancerStrengthZeroKeepsRmsConservative()
     var after = RmsPcm16(output);
 
     Assert(after <= before * 1.5, "strength 0 should stay conservative; before RMS " + before + ", after RMS " + after);
+}
+
+static void VoiceEnhancerStrengthOneHundredIsLouderForMediumVoice()
+{
+    var low = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 0 }
+    };
+    var high = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100 }
+    };
+    var input = MakeSineFrame(low.FrameSamples, amplitude: 10000);
+    var lowOutput = VoiceEnhancer.ProcessPcm16Mono(input, low);
+    var highOutput = VoiceEnhancer.ProcessPcm16Mono(input, high);
+    var lowRms = RmsPcm16(lowOutput);
+    var highRms = RmsPcm16(highOutput);
+    var peak = PeakPcm16(highOutput);
+
+    Assert(highRms > lowRms * 1.25, "strength 100 should be audibly louder than strength 0 for medium voice; low RMS " + lowRms + ", high RMS " + highRms);
+    Assert(peak <= 30000, "strength 100 medium frame exceeded output ceiling: " + peak);
 }
 
 static void VoiceEnhancerRejectsNonPcm16MonoClearly()
