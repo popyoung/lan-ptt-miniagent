@@ -1,28 +1,51 @@
-﻿# LanPttAudioLab Design
+# LanPttAudioLab 设计
 
-## Status
+## 状态
 
-Approved for design. This document defines the first implementation target for an internal audio analysis tool. It does not authorize implementation by itself.
+设计范围已确认；本文用于 review 和后续实现依据，但不代表已经开始实现。
 
-## Purpose
+本文中文优先，方便用户审阅。类名、项目名、JSON 字段、文件名保留英文并用反引号标出。
 
-`LanPttAudioLab` is an internal offline analysis tool for tuning microphone enhancement. It exists because real-time two-machine testing is slow, subjective, and hard to reproduce. The tool records one real microphone sample, applies multiple enhancement profiles offline, and produces comparable WAV files plus reports.
+## 用户确认需求对照表
 
-The tool is not a user-facing tuning console. It is for Codex-assisted tuning: the user records samples and gives listening feedback; Codex adjusts JSON presets; the tool reruns the same input through the same production enhancement code.
+| # | 用户确认需求 | 本文位置 |
+|---|---|---|
+| 1 | 需要一个内部音频分析工具，避免每次靠两台电脑实时实测调参 | 目标、第一版工作流 |
+| 2 | `LanPttAudioLab` 不需要发布，不影响主程序绿色单文件定位 | 非目标、项目结构 |
+| 3 | 录音应由程序内完成，使用环境尽量和 `LanPttIntercom` 一致 | 第一版工作流、录音路径 |
+| 4 | 应复用主程序现有音频处理逻辑，避免另写一套导致漂移 | 共享音频配置、实现顺序 |
+| 5 | 主程序和 AudioLab 都应使用 `AudioEnhancementProfile` | 共享音频配置 |
+| 6 | 预设参数应通过 JSON 可调 | 预设 JSON |
+| 7 | 第一版不是给用户手调的实时滑杆界面，而是便于 Codex 分析后调参 | 目标、非目标 |
+| 8 | 普通说话测试和哼唱/音高测试应分成两部分 | Run Type：语音质量、Run Type：音高扫描 |
+| 9 | 音高测试不能假设用户能唱固定低/中/高音，只要求尽量保持一个音高再换另一个 | Run Type：音高扫描 |
+| 10 | 音高测试允许用户决定录制多段 | Run Type：音高扫描 |
+| 11 | 新的音高分析不能替换原先爆破音、断续、底噪、削顶等问题分析 | 报告结构、Run Type：语音质量 |
+| 12 | 不能静默 fallback；录音、JSON、预设、报告失败都要明确提示 | 错误处理 |
+| 13 | 真实麦克风和主观听感仍需要人工验证 | 测试策略 |
 
-## Non-Goals
+## 目标
 
-- Do not publish `LanPttAudioLab` as part of the green single-file intercom app.
-- Do not add a realtime slider-based DSP editor in the first version.
-- Do not copy or fork the enhancement algorithm.
-- Do not make `LanPttIntercom` load external experimental profiles in the first version.
-- Do not require users to understand DSP parameter names.
+`LanPttAudioLab` 是内部离线音频分析工具，用于调试和改进麦克风增强效果。它存在的原因是：实时两机对讲测试速度慢、主观性强、无法稳定复现，也看不到波形和指标。
 
-## Shared Audio Profile
+工具按一次 run 录制一个真实麦克风输入 `raw.wav`，然后把同一段输入离线送入多组增强预设，生成可比较的 WAV 文件、CSV 指标和 HTML 报告。
 
-Add a shared `AudioEnhancementProfile` model that contains algorithm constants currently embedded in `VoiceEnhancer`.
+`LanPttAudioLab` 不是面向最终用户的调音台。第一版的定位是：用户按提示录制样本并反馈听感；Codex 根据报告、波形和听感调整 JSON 预设；工具用同一段输入重新跑同一套生产处理代码。
 
-Initial fields:
+## 非目标
+
+- 不把 `LanPttAudioLab` 发布为主程序的一部分。
+- 不改变 `LanPttIntercom` 的绿色单文件发布定位。
+- 第一版不做实时滑杆式 DSP 编辑器。
+- 不复制、不 fork 一套新的增强算法。
+- 第一版不让 `LanPttIntercom` 加载外部实验 profile JSON。
+- 不要求用户理解 DSP 参数名。
+
+## 共享音频配置
+
+新增共享模型 `AudioEnhancementProfile`，承载当前写死在 `VoiceEnhancer` 中的算法常量。
+
+第一版字段：
 
 - `HighPassBaseHz`
 - `HighPassStrengthSlopeHz`
@@ -42,15 +65,15 @@ Initial fields:
 - `LimiterReleaseSeconds`
 - `OutputCeiling`
 
-`VoiceEnhancer` must accept `AudioSettings` plus `AudioEnhancementProfile`. The existing production behavior should be preserved by `AudioEnhancementProfile.Default`.
+`VoiceEnhancer` 接受 `AudioSettings` 和 `AudioEnhancementProfile`。现有生产行为必须由 `AudioEnhancementProfile.Default` 保持不变。
 
-`LanPttIntercom` uses only `AudioEnhancementProfile.Default` in the first version. It does not load external profile JSON.
+`LanPttIntercom` 第一版只使用 `AudioEnhancementProfile.Default`，不从外部 JSON 加载实验 profile。
 
-`LanPttAudioLab` reads experiment presets from JSON and overlays preset profile values onto `AudioEnhancementProfile.Default`. This keeps production and offline processing consistent while allowing experiments without code edits.
+`LanPttAudioLab` 从 JSON 读取实验预设，并把预设中的 profile 字段覆盖到 `AudioEnhancementProfile.Default` 上。这样可以保证主程序和离线分析用的是同一套处理路径，同时允许不改代码就做实验。
 
-## Project Structure
+## 项目结构
 
-Add a new project:
+新增项目：
 
 ```text
 src/LanPttAudioLab/
@@ -67,26 +90,26 @@ src/LanPttAudioLab/
     HtmlReportWriter.cs
 ```
 
-`LanPttAudioLab.csproj` references `..\LanPttIntercom\LanPttIntercom.csproj`, similar to the existing tests project. It may be a normal framework-dependent WinForms executable and is not part of the main app publish flow.
+`LanPttAudioLab.csproj` 引用 `..\LanPttIntercom\LanPttIntercom.csproj`，类似现有测试项目。它可以是普通 framework-dependent WinForms 程序，不进入主程序发布流程。
 
-## First-Version Workflow
+## 第一版工作流
 
-The UI can be minimal. It needs only enough controls to run analysis:
+界面可以很简陋，只需要保证分析方便、可复现：
 
-1. Select or create an experiment directory.
-2. Choose run type: `speech-quality` or `pitch-sweep`.
-3. Choose input device, using the same `MmsAudioCapture` path as the main app.
-4. Record `raw.wav` into the experiment directory.
-5. Load or create `lab-presets.json`.
-6. Run all presets against `raw.wav`.
-7. Write output WAV files and reports.
-8. Open the report directory or `report.html`.
+1. 选择或创建实验目录。
+2. 选择 run type：`speech-quality` 或 `pitch-sweep`。
+3. 选择输入设备，录音路径使用和主程序相同的 `MmsAudioCapture`。
+4. 录制当前 run 的 `raw.wav`。
+5. 加载或创建 `lab-presets.json`。
+6. 对 `raw.wav` 运行所有预设。
+7. 写出输出 WAV、CSV 指标和 `report.html`。
+8. 打开报告目录或 `report.html`。
 
-The tool should only write inside the selected experiment directory unless the user explicitly chooses another path.
+除非用户显式选择其他路径，工具只写入所选实验目录。
 
-## Experiment Directory
+## 实验目录
 
-Each run lives in its own directory:
+每次 run 都有自己的目录。`speech-quality` 和 `pitch-sweep` 分开录制、分开分析、分开出报告，不共用同一个 `raw.wav`。
 
 ```text
 AudioLabRuns/
@@ -114,11 +137,11 @@ AudioLabRuns/
     report.html
 ```
 
-`run-type.json` records run metadata such as run type, timestamp, sample rate, frame length, selected device id, and tool version if available.
+`run-type.json` 记录 run type、时间戳、采样率、帧长、输入设备 id、工具版本等元数据。
 
-## Preset JSON
+## 预设 JSON
 
-`lab-presets.json` stores recording defaults and experiment presets:
+`lab-presets.json` 保存录音默认值和实验预设：
 
 ```json
 {
@@ -151,131 +174,138 @@ AudioLabRuns/
 }
 ```
 
-`profile: "default"` means use `AudioEnhancementProfile.Default` unchanged. If `profile` is an object, only supplied fields override the default profile. Unknown fields should be reported as errors instead of silently ignored.
+`profile: "default"` 表示完全使用 `AudioEnhancementProfile.Default`。如果 `profile` 是对象，则只覆盖对象里提供的字段。未知字段必须报错，不能静默忽略。
 
-Preset names must be sanitized before use as output filenames.
+预设名用于输出文件名之前必须做文件名清理。
 
-## Run Type: Speech Quality
+## Run Type：语音质量 `speech-quality`
 
-Purpose: reproduce normal push-to-talk speech quality issues.
+目的：复现普通对讲时的语音质量问题，包括音量不足、声音闷、爆破音、断续、ducking、底噪和接近削顶的失真风险。
 
-Suggested recording prompt:
+建议录音提示用中文分段显示：
 
 ```text
-Read one normal sentence, one quiet sentence, one louder sentence, then say several plosive-heavy words or syllables. Pause briefly and say one final normal sentence.
+1. 请保持安静 2 秒，用于采集底噪。
+2. 用正常音量说一句常用测试句。
+3. 用较小音量说同一句或类似句子。
+4. 用较大但不要喊叫的音量说一句话，用于检查接近削顶和限幅。
+5. 连续说几个容易产生爆破音的音节或词，例如“啪、怕、爆、破、噗”。
+6. 说几个短词或短句，中间故意停顿，用于检查断续、门限和 ducking。
+7. 最后再用正常音量说一句话，用于检查爆破音或大声段之后是否恢复正常。
 ```
 
-The report should focus on:
+报告重点：
 
-- Input and output RMS.
-- RMS gain in dB.
-- Peak and near-ceiling sample counts.
-- Frame-level envelope stability.
-- Low-energy or dropout-like frame ratio.
-- Plosive burst score based on low-frequency transient energy.
-- Post-plosive ducking over the next 50-200 ms.
-- Output WAV players for every preset.
+- 输入和输出 RMS。
+- RMS 增益 dB。
+- 峰值和 near-ceiling 样本数量。
+- 帧级包络稳定性。
+- 低能量帧比例和疑似 dropout 帧比例。
+- 基于低频瞬态能量的爆破音分数。
+- 爆破音之后 50-200 ms 的 ducking 情况。
+- 底噪段被放大的程度。
+- 每个预设的输出 WAV 播放器。
 
-Outputs:
+输出：
 
 - `metrics.csv`
 - `plosive-metrics.csv`
 - `report.html`
 - `outputs/<preset>.wav`
 
-## Run Type: Pitch Sweep
+## Run Type：音高扫描 `pitch-sweep`
 
-Purpose: diagnose pitch-related distortion found when the user hums different tones.
+目的：排查用户哼出不同音高时出现的严重失真、音色突变或某些音高被过度过滤的问题。
 
-The prompt must not assume the user can sing fixed low/mid/high notes. It should say:
+提示不能假设用户能准确控制低音、中音、高音，只要求尽量保持一段相对稳定的音高：
 
 ```text
-Each segment: try to hold one pitch for 1-3 seconds, pause briefly, then switch to a different pitch. You may record any number of segments.
+请录制任意数量的音高段。
+每段尽量保持一个音高 1-3 秒，然后停顿一下。
+下一段换一个不同音高，再保持 1-3 秒。
+不要求唱准固定音名，也不要求按低/中/高顺序录制。
 ```
 
-The analyzer should:
+分析器应当：
 
-1. Detect voiced segments by energy and silence gaps.
-2. Drop segments that are too short, such as under 0.6 seconds.
-3. Estimate dominant pitch for each segment.
-4. Record a pitch confidence value.
-5. Compare input and output for each segment.
+1. 根据能量和静音间隔检测 voiced segments。
+2. 丢弃过短段，例如短于 0.6 秒的片段。
+3. 估算每段主音高。
+4. 给出 `pitch_confidence`。
+5. 比较每段输入和每个预设输出的变化。
 
-The report should focus on:
+报告重点：
 
-- Segment start/end.
-- Estimated pitch in Hz.
-- Pitch confidence.
-- Input/output RMS and gain dB by segment.
-- Near-ceiling sample count.
-- Low-frequency ratio.
-- A THD-like or harmonic-ratio metric for distortion screening.
-- Estimated cap/limiter activity when feasible.
+- 每段开始/结束时间。
+- 估算音高 Hz。
+- `pitch_confidence`。
+- 每段输入/输出 RMS 和增益 dB。
+- near-ceiling 样本数量。
+- 低频比例。
+- 用于筛查失真的 THD-like 或 harmonic-ratio 指标。
+- 可行时估算限幅器活动。
 
-Outputs:
+输出：
 
 - `pitch-metrics.csv`
 - `report.html`
 - `outputs/<preset>.wav`
 
-## Report Format
+## 报告结构
 
-`report.html` should be static and self-contained enough to open from disk. It should include:
+`report.html` 应该是静态文件，能直接从磁盘打开。第一版可以用 inline SVG 或 HTML canvas 生成简单波形/包络图，不要求 polished UI。
 
-- Raw input audio player.
-- Output audio players for each preset.
-- Preset parameter summary.
-- Metrics tables.
-- Simple envelope chart for input and output.
-- Speech quality panel for speech runs.
-- Pitch segment panel for pitch runs.
+报告分三层，避免把新增音高分析误实现成替代原有语音分析：
 
-First version may use inline SVG or HTML canvas generated from compact sampled arrays. It does not need a polished UI.
+1. 通用增强指标：两种 run 都必须包含，包括原始音频播放器、每个预设输出播放器、预设参数摘要、RMS、峰值、near-ceiling、帧级包络等。
+2. `speech-quality` 专属面板：爆破音、ducking、dropout、底噪放大、接近削顶风险、语音段恢复情况。
+3. `pitch-sweep` 专属面板：segment 列表、音高 Hz、置信度、不同音高段的增益/失真/限幅筛查。
 
-## Metrics Notes
+## 指标说明
 
-Use simple, explainable metrics first:
+第一版优先使用简单、可解释、足够定位问题的指标：
 
-- RMS: root mean square of PCM16 samples.
-- Peak: maximum absolute sample value.
-- Near-ceiling count: samples near the output ceiling, e.g. absolute PCM value >= 29500.
-- Frame RMS: RMS over 20 ms frames.
-- Envelope stability: max/min or percentile ratio over voiced frames.
-- Low-energy frame ratio: fraction of voiced input frames where output RMS is unexpectedly low.
-- Plosive score: short-window low-frequency energy spike compared with nearby baseline.
-- Pitch estimate: simple autocorrelation is acceptable for first version; confidence should be low when no stable pitch is found.
-- THD-like metric: ratio of non-fundamental energy to total analyzed energy. It is a screening metric, not lab-grade THD.
+- RMS：PCM16 样本均方根。
+- Peak：最大绝对样本值。
+- Near-ceiling count：接近输出上限的样本数量，例如绝对 PCM 值 >= 29500。
+- Frame RMS：20 ms 帧 RMS。
+- Envelope stability：voiced frames 上的 max/min 或 percentile ratio。
+- Low-energy frame ratio：输入有声音但输出异常低的帧比例。
+- Plosive score：短窗口低频能量尖峰相对附近基线的分数。
+- Pitch estimate：第一版可以使用简单 autocorrelation。
+- Pitch confidence：没有稳定音高时应给低置信度。
+- THD-like metric：非基频能量相对总能量的比例；它只是筛查指标，不是实验室级 THD。
 
-## Error Handling
+## 错误处理
 
-- If recording fails, show the WinMM error and do not create a partial successful run.
-- If `lab-presets.json` is invalid, show the path and JSON error location when available.
-- If a preset is invalid, continue only if the user explicitly chooses to skip invalid presets; otherwise stop the run.
-- If report generation fails after WAV outputs are written, keep the WAV files and show the report error.
-- Do not silently fall back to different devices, sample rates, algorithms, or default presets.
+- 录音失败时显示 WinMM 错误，不创建“看起来成功”的部分 run。
+- `lab-presets.json` 无效时显示文件路径和 JSON 错误位置。
+- 单个 preset 无效时，只有用户显式选择跳过无效 preset 才继续，否则停止当前 run。
+- WAV 输出已经写出但报告生成失败时，保留 WAV，并弹出报告错误。
+- 不能静默 fallback 到其他设备、采样率、算法或默认预设。
 
-## Testing Strategy
+## 测试策略
 
-Add tests for shared, non-UI logic:
+自动化测试覆盖共享且非 UI 的逻辑：
 
-- `AudioEnhancementProfile.Default` preserves current production behavior.
-- JSON profile overlay applies only provided fields and rejects unknown fields.
-- WAV reader/writer round-trips PCM16 mono samples.
-- Offline batch processing produces one output per preset.
-- Speech metrics compute expected RMS/peak/frame values on synthetic input.
-- Pitch segmenter splits voiced segments separated by silence and drops too-short segments.
-- Pitch estimator returns a reasonable Hz value for synthetic sine input and low confidence for noise.
+- `AudioEnhancementProfile.Default` 保持现有生产行为。
+- JSON profile overlay 只覆盖提供字段，并拒绝未知字段。
+- WAV reader/writer 可以 round-trip PCM16 mono 样本。
+- 离线批处理对每个 preset 都生成一个输出。
+- 语音指标能在合成输入上得到预期 RMS、peak、frame 值。
+- pitch segmenter 能按静音切分 voiced segments，并丢弃过短片段。
+- pitch estimator 对合成正弦波返回合理 Hz，对噪声返回低置信度。
 
-Manual verification remains required for real microphone capture and subjective listening.
+真实麦克风采集、听感、爆破音是否干净、人声是否闷、不同音高是否失真，仍需要人工验证。
 
-## Implementation Order
+## 实现顺序
 
-1. Extract `AudioEnhancementProfile` and update `VoiceEnhancer` to accept it while preserving current default behavior.
-2. Add tests for profile default behavior and overlay parsing.
-3. Add WAV read/write helpers.
-4. Add `LanPttAudioLab` project with minimal WinForms shell and capture-to-`raw.wav` path.
-5. Add offline batch runner that processes `raw.wav` through presets.
-6. Add metrics CSV generation.
-7. Add static HTML report generation.
-8. Add speech-quality and pitch-sweep analyzers.
-9. Run the Codex/MiniMax review workflow before merging implementation.
+1. 抽取 `AudioEnhancementProfile`，更新 `VoiceEnhancer` 接收 profile，同时保持默认行为不变。
+2. 为默认 profile 行为和 JSON overlay 写测试。
+3. 增加 WAV 读写 helper。
+4. 新增 `LanPttAudioLab` 项目，先做最小 WinForms shell 和录制 `raw.wav`。
+5. 增加离线 batch runner，把 `raw.wav` 送入多个预设。
+6. 增加 CSV 指标输出。
+7. 增加静态 HTML 报告输出。
+8. 增加 `speech-quality` 和 `pitch-sweep` 分析器。
+9. 实现完成后按 Codex/MiniMax review workflow 生成审查包并交 MiniMax 审查。
