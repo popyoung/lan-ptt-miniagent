@@ -6,12 +6,23 @@ using LanPttIntercom.Audio;
 using LanPttIntercom.Models;
 using LanPttIntercom.Network;
 using LanPttIntercom.Storage;
+using LanPttAudioLab;
+using LanPttAudioLab.Metrics;
 
 var tests = new (string Name, Action Run)[]
 {
     ("SettingsStore default path is executable directory settings.json", SettingsStoreDefaultPathUsesBaseDirectory),
     ("SettingsStore saves and backs up only inside configured directory", SettingsStoreUsesConfiguredDirectoryOnly),
     ("SettingsStore clamps enhancement max gain multiplier", SettingsStoreClampsEnhancementMaxGainMultiplier),
+    ("AudioEnhancementProfile default matches current production constants", AudioEnhancementProfileDefaultMatchesProductionConstants),
+    ("AudioLab profile overlay only changes provided fields", AudioLabProfileOverlayOnlyChangesProvidedFields),
+    ("AudioLab profile overlay rejects unknown fields", AudioLabProfileOverlayRejectsUnknownFields),
+    ("AudioLab preset save preserves profile overlay JSON", AudioLabPresetSavePreservesProfileOverlayJson),
+    ("AudioLab runner writes raw and output references to run metadata", AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata),
+    ("WavFile round-trips PCM16 mono samples", WavFileRoundTripsPcm16MonoSamples),
+    ("AudioMetrics calculates basic PCM16 values", AudioMetricsCalculatesBasicPcm16Values),
+    ("PitchSweepAnalyzer segments voiced regions and estimates pitch", PitchSweepAnalyzerSegmentsVoicedRegionsAndEstimatesPitch),
+    ("PitchSweepAnalyzer reports dropped short voiced segments", PitchSweepAnalyzerReportsDroppedShortVoicedSegments),
     ("VoiceEnhancer bypasses disabled audio enhancement", VoiceEnhancerBypassesDisabledEnhancement),
     ("VoiceEnhancer boosts quiet PCM16 mono voice without clipping", VoiceEnhancerBoostsQuietVoice),
     ("VoiceEnhancer strength zero keeps RMS conservative", VoiceEnhancerStrengthZeroKeepsRmsConservative),
@@ -30,7 +41,7 @@ var tests = new (string Name, Action Run)[]
     ("VoiceEnhancer strength zero preserves low male fundamental", VoiceEnhancerStrengthZeroPreservesLowMaleFundamental),
     ("VoiceEnhancer strength one hundred preserves mid-frequency speech energy", VoiceEnhancerStrengthOneHundredPreservesMidFrequencySpeechEnergy),
     ("VoiceEnhancer rejects non PCM16 mono settings clearly", VoiceEnhancerRejectsNonPcm16MonoClearly),
-    ("VoiceEnhancer matches sample rate and strength changes", VoiceEnhancerMatchesSampleRateAndStrengthChanges),
+    ("VoiceEnhancer matches sample rate strength and profile changes", VoiceEnhancerMatchesSampleRateStrengthAndProfileChanges),
     ("Pcm16Frame applies output volume percentage", Pcm16FrameAppliesOutputVolume),
     ("Pcm16Frame applies output volume in place", Pcm16FrameAppliesOutputVolumeInPlace),
     ("MmsAudioPlayback keeps WAVEHDR prepared flag for submit", MmsAudioPlaybackKeepsPreparedFlagForSubmit),
@@ -63,6 +74,8 @@ foreach (var test in tests)
     }
 }
 
+Console.Out.Flush();
+Console.Error.Flush();
 return failed == 0 ? 0 : 1;
 
 static void SettingsStoreDefaultPathUsesBaseDirectory()
@@ -145,6 +158,193 @@ static void SettingsStoreClampsEnhancementMaxGainMultiplier()
     {
         try { Directory.Delete(dir, recursive: true); } catch { }
     }
+}
+
+static void AudioEnhancementProfileDefaultMatchesProductionConstants()
+{
+    var profile = AudioEnhancementProfile.Default;
+
+    AssertEqual(80.0, profile.HighPassBaseHz, "default high-pass base");
+    AssertEqual(0.8, profile.HighPassStrengthSlopeHz, "default high-pass strength slope");
+    AssertEqual(2200.0, profile.PresenceCenterHz, "default presence center");
+    AssertEqual(0.9, profile.PresenceQ, "default presence Q");
+    AssertEqual(3.0, profile.PresenceGainDbAt100, "default presence gain at 100");
+    AssertEqual(0.055, profile.TargetRmsBase, "default target RMS base");
+    AssertEqual(0.220, profile.TargetRmsAt100, "default target RMS at 100");
+    AssertEqual(2.2, profile.MakeupGainAt100, "default makeup gain at 100");
+    AssertEqual(75.0, profile.PlosiveStrengthThreshold, "default plosive strength threshold");
+    AssertEqual(0.08, profile.PlosiveInputRmsThreshold, "default plosive input RMS threshold");
+    AssertEqual(0.65, profile.PlosiveFilteredRatioThreshold, "default plosive filtered ratio threshold");
+    AssertEqual(0.65, profile.PlosiveOutputRmsCeiling, "default plosive output RMS ceiling");
+    AssertEqual(-2.0, profile.LimiterThresholdDb, "default limiter threshold");
+    AssertEqual(20.0, profile.LimiterRatio, "default limiter ratio");
+    AssertEqual(0.002, profile.LimiterAttackSeconds, "default limiter attack");
+    AssertEqual(0.050, profile.LimiterReleaseSeconds, "default limiter release");
+    AssertEqual(30000.0 / 32768.0, profile.OutputCeiling, "default output ceiling");
+}
+
+static void AudioLabProfileOverlayOnlyChangesProvidedFields()
+{
+    using var document = JsonDocument.Parse("{\"highPassBaseHz\":65,\"plosiveOutputRmsCeiling\":0.75}");
+    var profile = AudioLabPresetParser.ParseProfile(document.RootElement);
+
+    AssertEqual(65.0, profile.HighPassBaseHz, "overlay high-pass base");
+    AssertEqual(0.75, profile.PlosiveOutputRmsCeiling, "overlay plosive output RMS ceiling");
+    AssertEqual(AudioEnhancementProfile.Default.PresenceCenterHz, profile.PresenceCenterHz, "overlay should preserve unspecified presence center");
+    AssertEqual(AudioEnhancementProfile.Default.OutputCeiling, profile.OutputCeiling, "overlay should preserve unspecified output ceiling");
+}
+
+static void AudioLabProfileOverlayRejectsUnknownFields()
+{
+    using var document = JsonDocument.Parse("{\"highPassBaseHz\":65,\"unknownProfileField\":1}");
+    var error = AssertThrows<FormatException>(() => AudioLabPresetParser.ParseProfile(document.RootElement), "unknown profile field should be rejected");
+
+    Assert(error.Message.Contains("unknownProfileField", StringComparison.Ordinal), "unknown field name should be included in error: " + error.Message);
+}
+
+static void AudioLabPresetSavePreservesProfileOverlayJson()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        var path = Path.Combine(dir, "lab-presets.json");
+        File.WriteAllText(path,
+            "{\n" +
+            "  \"recording\": {\n" +
+            "    \"seconds\": 8,\n" +
+            "    \"sampleRate\": 16000,\n" +
+            "    \"bitsPerSample\": 16,\n" +
+            "    \"channels\": 1,\n" +
+            "    \"frameMilliseconds\": 20,\n" +
+            "    \"inputDeviceId\": -1\n" +
+            "  },\n" +
+            "  \"presets\": [\n" +
+            "    {\n" +
+            "      \"name\": \"less-filtering\",\n" +
+            "      \"strength\": 100,\n" +
+            "      \"maxGainMultiplier\": 100,\n" +
+            "      \"profile\": {\n" +
+            "        \"highPassBaseHz\": 65,\n" +
+            "        \"plosiveOutputRmsCeiling\": 0.75\n" +
+            "      }\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}\n",
+            System.Text.Encoding.UTF8);
+
+        var set = AudioLabPresetSet.LoadOrCreate(path);
+        set.Recording.FrameMilliseconds = 30;
+        set.Save(path);
+
+        using var saved = JsonDocument.Parse(File.ReadAllText(path, System.Text.Encoding.UTF8));
+        var profile = saved.RootElement.GetProperty("presets")[0].GetProperty("profile");
+        Assert(profile.TryGetProperty("highPassBaseHz", out var highPass), "saved overlay should keep highPassBaseHz");
+        AssertEqual(65.0, highPass.GetDouble(), "saved overlay highPassBaseHz");
+        Assert(profile.TryGetProperty("plosiveOutputRmsCeiling", out var plosive), "saved overlay should keep plosiveOutputRmsCeiling");
+        AssertEqual(0.75, plosive.GetDouble(), "saved overlay plosiveOutputRmsCeiling");
+        Assert(!profile.TryGetProperty("presenceCenterHz", out _), "saved overlay should not expand unspecified profile fields");
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        WavFile.WritePcm16Mono(Path.Combine(dir, "raw.wav"), 16000, MakeSineSamples(16000, 0.7, 220, 2000));
+        File.WriteAllText(Path.Combine(dir, "lab-presets.json"),
+            "{\"recording\":{\"seconds\":1,\"sampleRate\":16000,\"bitsPerSample\":16,\"channels\":1,\"frameMilliseconds\":20,\"inputDeviceId\":-1},\"presets\":[{\"name\":\"default-50-8\",\"strength\":50,\"maxGainMultiplier\":8,\"profile\":\"default\"}]}",
+            System.Text.Encoding.UTF8);
+
+        _ = AudioLabRunner.RunAllPresets(dir, AudioLabRunner.PitchSweep);
+
+        using var metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "run-type.json"), System.Text.Encoding.UTF8));
+        var root = metadata.RootElement;
+        AssertEqual("raw.wav", root.GetProperty("rawFileName").GetString(), "metadata raw file name");
+        Assert(root.GetProperty("rawBytes").GetInt64() > 44, "metadata raw bytes should include WAV payload");
+        AssertEqual(1, root.GetProperty("presetCount").GetInt32(), "metadata preset count");
+        AssertEqual("default-50-8", root.GetProperty("presetNames")[0].GetString(), "metadata preset name");
+        AssertEqual("outputs/default-50-8.wav", root.GetProperty("outputsFileNames")[0].GetString()?.Replace('\\', '/'), "metadata output file name");
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void WavFileRoundTripsPcm16MonoSamples()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        var path = Path.Combine(dir, "roundtrip.wav");
+        var samples = new short[] { 0, 1200, -1200, short.MaxValue, short.MinValue + 1 };
+
+        WavFile.WritePcm16Mono(path, 16000, samples);
+        var loaded = WavFile.ReadPcm16Mono(path);
+
+        AssertEqual(16000, loaded.SampleRate, "round-trip sample rate");
+        AssertEqual(samples.Length, loaded.Samples.Length, "round-trip sample count");
+        for (int i = 0; i < samples.Length; i++)
+        {
+            AssertEqual(samples[i], loaded.Samples[i], "round-trip sample " + i);
+        }
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void AudioMetricsCalculatesBasicPcm16Values()
+{
+    var samples = new short[] { 0, 30000, -30000, 1000, 100, -100, 0, 0 };
+    var metrics = AudioMetrics.Calculate(samples, sampleRate: 1000, frameMilliseconds: 4);
+
+    Assert(metrics.Rms > 15000 && metrics.Rms < 16000, "RMS should reflect sample energy: " + metrics.Rms);
+    AssertEqual(30000, metrics.Peak, "peak");
+    AssertEqual(2, metrics.NearCeilingCount, "near-ceiling count");
+    AssertEqual(2, metrics.FrameRms.Count, "frame RMS count");
+    Assert(metrics.LowEnergyFrameRatio > 0.4 && metrics.LowEnergyFrameRatio < 0.6, "one of two frames should be low energy: " + metrics.LowEnergyFrameRatio);
+}
+
+static void PitchSweepAnalyzerSegmentsVoicedRegionsAndEstimatesPitch()
+{
+    var sampleRate = 16000;
+    var samples = new List<short>();
+    samples.AddRange(new short[sampleRate / 5]);
+    samples.AddRange(MakeSineSamples(sampleRate, seconds: 1.0, frequencyHz: 220, amplitude: 8000));
+    samples.AddRange(new short[sampleRate / 5]);
+    samples.AddRange(MakeSineSamples(sampleRate, seconds: 1.0, frequencyHz: 440, amplitude: 8000));
+
+    var segments = PitchSweepAnalyzer.DetectVoicedSegments(samples.ToArray(), sampleRate);
+
+    AssertEqual(2, segments.Count, "voiced segment count");
+    Assert(Math.Abs(segments[0].PitchHz - 220) < 15, "first pitch should be close to 220Hz: " + segments[0].PitchHz);
+    Assert(Math.Abs(segments[1].PitchHz - 440) < 25, "second pitch should be close to 440Hz: " + segments[1].PitchHz);
+    Assert(segments[0].PitchConfidence > 0.5, "first pitch confidence should be useful: " + segments[0].PitchConfidence);
+    Assert(segments[1].PitchConfidence > 0.5, "second pitch confidence should be useful: " + segments[1].PitchConfidence);
+}
+
+static void PitchSweepAnalyzerReportsDroppedShortVoicedSegments()
+{
+    var sampleRate = 16000;
+    var samples = new List<short>();
+    samples.AddRange(MakeSineSamples(sampleRate, seconds: 0.3, frequencyHz: 220, amplitude: 8000));
+    samples.AddRange(new short[sampleRate / 5]);
+    samples.AddRange(MakeSineSamples(sampleRate, seconds: 0.8, frequencyHz: 440, amplitude: 8000));
+
+    var result = PitchSweepAnalyzer.DetectVoicedSegmentsWithDroppedCount(samples.ToArray(), sampleRate);
+
+    AssertEqual(1, result.DroppedShortSegmentCount, "dropped short segment count");
+    AssertEqual(1, result.Segments.Count, "kept voiced segment count");
 }
 
 static void VoiceEnhancerBypassesDisabledEnhancement()
@@ -569,7 +769,7 @@ static void VoiceEnhancerRejectsNonPcm16MonoClearly()
     AssertEqual("语音增强只支持 PCM16 单声道音频。", bitsError.Message, "bits rejection message");
 }
 
-static void VoiceEnhancerMatchesSampleRateAndStrengthChanges()
+static void VoiceEnhancerMatchesSampleRateStrengthAndProfileChanges()
 {
     var audio = new AudioSettings
     {
@@ -579,7 +779,7 @@ static void VoiceEnhancerMatchesSampleRateAndStrengthChanges()
         FrameMilliseconds = 20,
         Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50 }
     };
-    var enhancer = new VoiceEnhancer(audio);
+    var enhancer = new VoiceEnhancer(audio, AudioEnhancementProfile.Default);
 
     Assert(enhancer.Matches(audio), "same settings should match");
     Assert(!enhancer.Matches(new AudioSettings
@@ -606,6 +806,7 @@ static void VoiceEnhancerMatchesSampleRateAndStrengthChanges()
         FrameMilliseconds = 20,
         Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 50, MaxGainMultiplier = 30 }
     }), "max gain multiplier change should not match");
+    Assert(!enhancer.Matches(audio, AudioEnhancementProfile.Default with { HighPassBaseHz = 65 }), "profile change should not match");
 }
 
 static void Pcm16FrameAppliesOutputVolume()
@@ -832,6 +1033,18 @@ static byte[] MakeSineFrameAtFrequency(int samples, double frequencyHz, short am
         data[i * 2] = (byte)(sample & 0xFF);
         data[i * 2 + 1] = (byte)((sample >> 8) & 0xFF);
     }
+    return data;
+}
+
+static short[] MakeSineSamples(int sampleRate, double seconds, double frequencyHz, short amplitude)
+{
+    var count = (int)Math.Round(sampleRate * seconds);
+    var data = new short[count];
+    for (int i = 0; i < count; i++)
+    {
+        data[i] = (short)(Math.Sin(i * 2.0 * Math.PI * frequencyHz / sampleRate) * amplitude);
+    }
+
     return data;
 }
 

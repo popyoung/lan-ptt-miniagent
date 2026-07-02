@@ -1,15 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net6.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>LanPttAudioLab</RootNamespace>
+    <AssemblyName>LanPttAudioLab</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LanPttIntercom\LanPttIntercom.csproj" />
-    <ProjectReference Include="..\LanPttAudioLab\LanPttAudioLab.csproj" />
   </ItemGroup>
 
 </Project>
