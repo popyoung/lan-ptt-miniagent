@@ -18,6 +18,8 @@ var tests = new (string Name, Action Run)[]
     ("AudioLab profile overlay only changes provided fields", AudioLabProfileOverlayOnlyChangesProvidedFields),
     ("AudioLab profile overlay rejects unknown fields", AudioLabProfileOverlayRejectsUnknownFields),
     ("AudioLab preset save preserves profile overlay JSON", AudioLabPresetSavePreservesProfileOverlayJson),
+    ("AudioLab preset save omits obsolete recording seconds", AudioLabPresetSaveOmitsObsoleteRecordingSeconds),
+    ("AudioLab recording frame length keeps preset value until UI edits", AudioLabRecordingFrameLengthKeepsPresetValueUntilUiEdits),
     ("AudioLab runner writes raw and output references to run metadata", AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata),
     ("WavFile round-trips PCM16 mono samples", WavFileRoundTripsPcm16MonoSamples),
     ("AudioMetrics calculates basic PCM16 values", AudioMetricsCalculatesBasicPcm16Values),
@@ -249,6 +251,55 @@ static void AudioLabPresetSavePreservesProfileOverlayJson()
     {
         try { Directory.Delete(dir, recursive: true); } catch { }
     }
+}
+
+static void AudioLabPresetSaveOmitsObsoleteRecordingSeconds()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        var path = Path.Combine(dir, "lab-presets.json");
+        File.WriteAllText(path,
+            "{\n" +
+            "  \"recording\": {\n" +
+            "    \"seconds\": 8,\n" +
+            "    \"sampleRate\": 16000,\n" +
+            "    \"bitsPerSample\": 16,\n" +
+            "    \"channels\": 1,\n" +
+            "    \"frameMilliseconds\": 20,\n" +
+            "    \"inputDeviceId\": -1\n" +
+            "  },\n" +
+            "  \"presets\": [\n" +
+            "    {\"name\":\"default-50-8\",\"strength\":50,\"maxGainMultiplier\":8,\"profile\":\"default\"}\n" +
+            "  ]\n" +
+            "}\n",
+            System.Text.Encoding.UTF8);
+
+        var set = AudioLabPresetSet.LoadOrCreate(path);
+        AssertEqual(20, set.Recording.FrameMilliseconds, "legacy recording should still load frame length");
+        set.Save(path);
+
+        using var saved = JsonDocument.Parse(File.ReadAllText(path, System.Text.Encoding.UTF8));
+        var recording = saved.RootElement.GetProperty("recording");
+        Assert(!recording.TryGetProperty("seconds", out _), "manual recording should not persist fixed seconds");
+        AssertEqual(20, recording.GetProperty("frameMilliseconds").GetInt32(), "saved frame length");
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void AudioLabRecordingFrameLengthKeepsPresetValueUntilUiEdits()
+{
+    var recording = new AudioLabRecordingSettings { FrameMilliseconds = 40 };
+
+    var untouched = recording.ResolveFrameMillisecondsForCapture(20, false);
+    var edited = recording.ResolveFrameMillisecondsForCapture(30, true);
+
+    AssertEqual(40, untouched, "preset frame length should win before UI edit");
+    AssertEqual(30, edited, "edited UI frame length should win after UI edit");
 }
 
 static void AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata()

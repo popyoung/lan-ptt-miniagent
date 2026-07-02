@@ -27,14 +27,17 @@ public sealed class MainForm : Form
     private readonly TextBox _txtDirectory = new() { Dock = DockStyle.Fill };
     private readonly ComboBox _cmbRunType = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly ComboBox _cmbInputDevice = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    private readonly NumericUpDown _numSeconds = new() { Minimum = 1, Maximum = 120, Value = 8, Dock = DockStyle.Left, Width = 80 };
     private readonly NumericUpDown _numFrameMilliseconds = new() { Minimum = 10, Maximum = 100, Value = 20, Dock = DockStyle.Left, Width = 80 };
     private readonly TextBox _txtPrompt = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private readonly TextBox _txtLog = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
-    private readonly Button _btnRecord = new() { Text = "录制 raw.wav", AutoSize = true };
+    private readonly Button _btnRecord = new() { Text = "开始录制 raw.wav", AutoSize = true };
     private readonly Button _btnRun = new() { Text = "复用 raw.wav 并运行全部 presets", AutoSize = true };
     private MmsAudioCapture? _capture;
     private readonly List<byte> _captured = new();
+    private int _recordingSampleRate = 16000;
+    private bool _isRecording;
+    private bool _frameMillisecondsEdited;
+    private bool _syncingFrameMilliseconds;
 
     public MainForm()
     {
@@ -46,10 +49,17 @@ public sealed class MainForm : Form
         _cmbRunType.Items.Add(AudioLabRunner.PitchSweep);
         _cmbRunType.SelectedIndex = 0;
         _cmbRunType.SelectedIndexChanged += (_, __) => UpdatePrompt();
+        _numFrameMilliseconds.ValueChanged += (_, __) =>
+        {
+            if (!_syncingFrameMilliseconds)
+            {
+                _frameMillisecondsEdited = true;
+            }
+        };
 
         _txtDirectory.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AudioLabRuns", DateTime.Now.ToString("yyyy-MM-dd-speech-001"));
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 9, Padding = new Padding(8) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 7, Padding = new Padding(8) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
@@ -57,11 +67,9 @@ public sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
 
         AddLabel(layout, "实验目录", 0);
         layout.Controls.Add(_txtDirectory, 1, 0);
@@ -81,11 +89,8 @@ public sealed class MainForm : Form
         refreshDevices.Click += (_, __) => LoadDevices();
         layout.Controls.Add(refreshDevices, 2, 2);
 
-        AddLabel(layout, "录制秒数", 3);
-        layout.Controls.Add(_numSeconds, 1, 3);
-
-        AddLabel(layout, "帧长 ms", 4);
-        layout.Controls.Add(_numFrameMilliseconds, 1, 4);
+        AddLabel(layout, "帧长 ms", 3);
+        layout.Controls.Add(_numFrameMilliseconds, 1, 3);
 
         var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
         buttonPanel.Controls.Add(_btnRecord);
@@ -96,19 +101,19 @@ public sealed class MainForm : Form
         openReport.Click += (_, __) => OpenPath(Path.Combine(ExperimentDirectory, "report.html"));
         buttonPanel.Controls.Add(openDir);
         buttonPanel.Controls.Add(openReport);
-        layout.Controls.Add(buttonPanel, 1, 5);
+        layout.Controls.Add(buttonPanel, 1, 4);
         layout.SetColumnSpan(buttonPanel, 2);
 
-        AddLabel(layout, "录制提示", 6);
-        layout.Controls.Add(_txtPrompt, 1, 6);
+        AddLabel(layout, "录制提示", 5);
+        layout.Controls.Add(_txtPrompt, 1, 5);
         layout.SetColumnSpan(_txtPrompt, 2);
 
-        AddLabel(layout, "日志", 7);
-        layout.Controls.Add(_txtLog, 1, 7);
+        AddLabel(layout, "日志", 6);
+        layout.Controls.Add(_txtLog, 1, 6);
         layout.SetColumnSpan(_txtLog, 2);
 
         Controls.Add(layout);
-        _btnRecord.Click += (_, __) => RecordRaw();
+        _btnRecord.Click += (_, __) => ToggleRecording();
         _btnRun.Click += (_, __) => RunPresets();
 
         LoadDevices();
@@ -144,8 +149,7 @@ public sealed class MainForm : Form
             Directory.CreateDirectory(ExperimentDirectory);
             var path = Path.Combine(ExperimentDirectory, "lab-presets.json");
             var set = AudioLabPresetSet.LoadOrCreate(path);
-            _numSeconds.Value = Math.Clamp(set.Recording.Seconds, (int)_numSeconds.Minimum, (int)_numSeconds.Maximum);
-            _numFrameMilliseconds.Value = Math.Clamp(set.Recording.FrameMilliseconds, (int)_numFrameMilliseconds.Minimum, (int)_numFrameMilliseconds.Maximum);
+            ApplyRecordingSettingsToUi(set.Recording);
             Log("已加载/创建 " + path);
         }
         catch (Exception ex)
@@ -154,22 +158,55 @@ public sealed class MainForm : Form
         }
     }
 
-    private void RecordRaw()
+    private void ApplyRecordingSettingsToUi(AudioLabRecordingSettings recording)
+    {
+        _syncingFrameMilliseconds = true;
+        try
+        {
+            _numFrameMilliseconds.Value = Math.Clamp(recording.FrameMilliseconds, (int)_numFrameMilliseconds.Minimum, (int)_numFrameMilliseconds.Maximum);
+        }
+        finally
+        {
+            _syncingFrameMilliseconds = false;
+        }
+
+        _frameMillisecondsEdited = false;
+    }
+
+    private void ToggleRecording()
+    {
+        if (_isRecording)
+        {
+            StopRecording();
+        }
+        else
+        {
+            StartRecording();
+        }
+    }
+
+    private void StartRecording()
     {
         try
         {
             Directory.CreateDirectory(ExperimentDirectory);
             var presetPath = Path.Combine(ExperimentDirectory, "lab-presets.json");
             var set = AudioLabPresetSet.LoadOrCreate(presetPath);
-            set.Recording.Seconds = (int)_numSeconds.Value;
-            set.Recording.FrameMilliseconds = (int)_numFrameMilliseconds.Value;
+            if (!_frameMillisecondsEdited)
+            {
+                ApplyRecordingSettingsToUi(set.Recording);
+            }
+
+            set.Recording.FrameMilliseconds = set.Recording.ResolveFrameMillisecondsForCapture((int)_numFrameMilliseconds.Value, _frameMillisecondsEdited);
             set.Recording.InputDeviceId = SelectedInputDeviceId();
             set.Save(presetPath);
+            _frameMillisecondsEdited = false;
 
             var settings = set.Recording.ToAudioSettings(strength: 50, maxGainMultiplier: 8);
             settings.Enhancement.Enabled = false;
             settings.InputDeviceId = set.Recording.InputDeviceId;
 
+            _recordingSampleRate = settings.SampleRate;
             _captured.Clear();
             _capture = new MmsAudioCapture(settings);
             _capture.FrameCaptured += frame =>
@@ -179,44 +216,50 @@ public sealed class MainForm : Form
                     _captured.AddRange(frame);
                 }
             };
-            _capture.ErrorOccurred += message => BeginInvoke(new Action(() => Log("录音错误: " + message)));
-            _capture.Start();
-            _btnRecord.Enabled = false;
-            Log("开始录制 raw.wav，秒数: " + set.Recording.Seconds);
-
-            var timer = new System.Windows.Forms.Timer { Interval = set.Recording.Seconds * 1000 };
-            timer.Tick += (_, __) =>
+            _capture.ErrorOccurred += message =>
             {
-                timer.Stop();
-                timer.Dispose();
-                StopRecording(settings.SampleRate);
+                if (IsHandleCreated && !IsDisposed)
+                {
+                    BeginInvoke(new Action(() => Log("录音错误: " + message)));
+                }
             };
-            timer.Start();
+            _capture.Start();
+            _isRecording = true;
+            _btnRecord.Text = "停止录制并保存 raw.wav";
+            _btnRun.Enabled = false;
+            Log("开始录制 raw.wav；再次点击录制按钮停止并保存。");
         }
         catch (Exception ex)
         {
-            _btnRecord.Enabled = true;
             _capture?.Dispose();
             _capture = null;
+            _isRecording = false;
+            _btnRecord.Text = "开始录制 raw.wav";
+            _btnRun.Enabled = true;
             ShowError("录制 raw.wav 失败", ex);
         }
     }
 
-    private void StopRecording(int sampleRate)
+    private void StopRecording()
     {
         try
         {
             _capture?.Dispose();
-            _capture = null;
+
             byte[] bytes;
             lock (_captured)
             {
                 bytes = _captured.ToArray();
             }
 
+            if (bytes.Length == 0)
+            {
+                throw new InvalidOperationException("没有采集到音频数据，raw.wav 未写出。");
+            }
+
             var samples = WavFile.BytesToSamples(bytes);
             var path = Path.Combine(ExperimentDirectory, "raw.wav");
-            WavFile.WritePcm16Mono(path, sampleRate, samples);
+            WavFile.WritePcm16Mono(path, _recordingSampleRate, samples);
             Log("已写出 " + path + "，样本数: " + samples.Length);
         }
         catch (Exception ex)
@@ -225,7 +268,10 @@ public sealed class MainForm : Form
         }
         finally
         {
-            _btnRecord.Enabled = true;
+            _capture = null;
+            _isRecording = false;
+            _btnRecord.Text = "开始录制 raw.wav";
+            _btnRun.Enabled = true;
         }
     }
 
@@ -257,6 +303,23 @@ public sealed class MainForm : Form
     private void UpdatePrompt()
     {
         _txtPrompt.Text = SelectedRunType() == AudioLabRunner.PitchSweep ? PitchPrompt : SpeechPrompt;
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (_isRecording)
+        {
+            Log("窗口关闭，正在停止录制并保存 raw.wav。");
+            StopRecording();
+        }
+
+        base.OnFormClosing(e);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _capture?.Dispose();
+        base.OnFormClosed(e);
     }
 
     private void OpenPath(string path)

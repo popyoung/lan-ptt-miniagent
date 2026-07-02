@@ -81,12 +81,16 @@ public sealed class AudioLabPresetSet
 
 public sealed class AudioLabRecordingSettings
 {
-    public int Seconds { get; set; } = 8;
     public int SampleRate { get; set; } = 16000;
     public int BitsPerSample { get; set; } = 16;
     public int Channels { get; set; } = 1;
     public int FrameMilliseconds { get; set; } = 20;
     public int InputDeviceId { get; set; } = -1;
+
+    public int ResolveFrameMillisecondsForCapture(int uiFrameMilliseconds, bool uiEdited)
+    {
+        return uiEdited ? uiFrameMilliseconds : FrameMilliseconds;
+    }
 
     public AudioSettings ToAudioSettings(int strength, int maxGainMultiplier)
     {
@@ -257,7 +261,6 @@ public static class AudioLabPresetParser
         }
 
         var recording = new AudioLabRecordingSettings();
-        if (element.TryGetProperty("seconds", out var seconds)) recording.Seconds = Clamp(seconds.GetInt32(), 1, 120);
         if (element.TryGetProperty("sampleRate", out var sampleRate)) recording.SampleRate = sampleRate.GetInt32();
         if (element.TryGetProperty("bitsPerSample", out var bits)) recording.BitsPerSample = bits.GetInt32();
         if (element.TryGetProperty("channels", out var channels)) recording.Channels = channels.GetInt32();
