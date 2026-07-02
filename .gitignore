@@ -18,3 +18,6 @@ build.log
 .agent_memory.json
 .agent_state.json
 .agent_*.json
+
+# Local brainstorming/session artifacts
+.superpowers/
