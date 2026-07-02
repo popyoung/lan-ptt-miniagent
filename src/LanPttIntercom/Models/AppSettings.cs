@@ -70,11 +70,18 @@ public sealed class AudioSettings
 
 public sealed class AudioEnhancementSettings
 {
+    public const int MinMaxGainMultiplier = 4;
+    public const int MaxMaxGainMultiplier = 100;
+    public const int DefaultMaxGainMultiplier = 8;
+
     /// <summary>Enable NWaves-based microphone processing before UDP send.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Enhancement intensity, 0..100. Higher means stronger RMS lift and gating.</summary>
+    /// <summary>Enhancement intensity, 0..100. Higher means stronger RMS lift.</summary>
     public int Strength { get; set; } = 50;
+
+    /// <summary>Maximum automatic gain multiplier, 4..100.</summary>
+    public int MaxGainMultiplier { get; set; } = DefaultMaxGainMultiplier;
 }
 
 public sealed class UiSettings

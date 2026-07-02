@@ -76,6 +76,9 @@ public sealed class MainForm : Form
     private Label _lblEnhanceStrength = null!;
     private TrackBar _trkEnhancement = null!;
     private Label _lblEnhanceValue = null!;
+    private Label _lblMaxGain = null!;
+    private NumericUpDown _numMaxGain = null!;
+    private Label _lblGainWarning = null!;
     private Button _btnRestartAudio = null!;
     private Button _btnShowSettings = null!;
     private Label _lblCopyright = null!;
@@ -125,8 +128,8 @@ public sealed class MainForm : Form
     {
         Text = "局域网对讲机 - 按住说话";
         Width = 760;
-        Height = 780;
-        MinimumSize = new Size(700, 760);
+        Height = 868;
+        MinimumSize = new Size(700, 848);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
@@ -262,9 +265,9 @@ public sealed class MainForm : Form
             Left = 16,
             Top = 402,
             Width = 720,
-            Height = 130,
+            Height = 174,
             ColumnCount = 6,
-            RowCount = 3,
+            RowCount = 4,
             AutoSize = false,
             GrowStyle = TableLayoutPanelGrowStyle.FixedSize,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
@@ -278,6 +281,7 @@ public sealed class MainForm : Form
         _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 12F));
         _audioSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
         _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
         _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
         _audioSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
 
@@ -327,6 +331,28 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray
         };
+        _lblMaxGain = new Label { Text = "增益上限:", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
+        _numMaxGain = new NumericUpDown
+        {
+            Minimum = AudioEnhancementSettings.MinMaxGainMultiplier,
+            Maximum = AudioEnhancementSettings.MaxMaxGainMultiplier,
+            Value = Math.Clamp(
+                _settings.Audio.Enhancement.MaxGainMultiplier,
+                AudioEnhancementSettings.MinMaxGainMultiplier,
+                AudioEnhancementSettings.MaxMaxGainMultiplier),
+            Width = 70,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 4, 8, 4)
+        };
+        _lblGainWarning = new Label
+        {
+            Text = string.Empty,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DarkOrange,
+            Margin = new Padding(0, 4, 0, 4)
+        };
         _audioSettingsLayout.Controls.Add(_lblInput, 0, 0);
         _audioSettingsLayout.Controls.Add(_cmbInput, 1, 0);
         _audioSettingsLayout.Controls.Add(_lblOutput, 2, 0);
@@ -341,13 +367,17 @@ public sealed class MainForm : Form
         _audioSettingsLayout.Controls.Add(_trkEnhancement, 3, 2);
         _audioSettingsLayout.SetColumnSpan(_trkEnhancement, 2);
         _audioSettingsLayout.Controls.Add(_lblEnhanceValue, 5, 2);
+        _audioSettingsLayout.Controls.Add(_lblMaxGain, 0, 3);
+        _audioSettingsLayout.Controls.Add(_numMaxGain, 1, 3);
+        _audioSettingsLayout.Controls.Add(_lblGainWarning, 2, 3);
+        _audioSettingsLayout.SetColumnSpan(_lblGainWarning, 4);
 
         // Log
-        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 542, Width = 100, AutoSize = false };
+        _lblLog = new Label { Text = "状态日志:", Left = 16, Top = 586, Width = 100, AutoSize = false };
         _lstLog = new ListBox
         {
             Left = 16,
-            Top = 564,
+            Top = 608,
             Width = 720,
             Height = 92,
             IntegralHeight = false,
@@ -358,7 +388,7 @@ public sealed class MainForm : Form
         {
             Text = "局域网对讲机 v1.0  ·  本程序仅在同一局域网内通信",
             Left = 16,
-            Top = 668,
+            Top = 712,
             Width = 720,
             AutoSize = false,
             ForeColor = Color.Gray
@@ -414,6 +444,13 @@ public sealed class MainForm : Form
         _trkEnhancement.Scroll += (_, __) =>
         {
             _settings.Audio.Enhancement.Strength = _trkEnhancement.Value;
+            _controller.ResetVoiceEnhancer();
+            UpdateEnhancementControls();
+            TrySaveSettings();
+        };
+        _numMaxGain.ValueChanged += (_, __) =>
+        {
+            _settings.Audio.Enhancement.MaxGainMultiplier = (int)_numMaxGain.Value;
             _controller.ResetVoiceEnhancer();
             UpdateEnhancementControls();
             TrySaveSettings();
@@ -719,6 +756,7 @@ public sealed class MainForm : Form
         _settings.Ui.OutputVolume = _trkVolume.Value;
         _settings.Audio.Enhancement.Enabled = _chkEnhancement.Checked;
         _settings.Audio.Enhancement.Strength = _trkEnhancement.Value;
+        _settings.Audio.Enhancement.MaxGainMultiplier = (int)_numMaxGain.Value;
         if (!TrySaveSettings()) return;
         _controller.ResetVoiceEnhancer();
 
@@ -875,6 +913,10 @@ public sealed class MainForm : Form
         _chkPttKey.Checked = _settings.Ui.PttKeyEnabled;
         _chkEnhancement.Checked = _settings.Audio.Enhancement.Enabled;
         _trkEnhancement.Value = Math.Clamp(_settings.Audio.Enhancement.Strength, _trkEnhancement.Minimum, _trkEnhancement.Maximum);
+        _numMaxGain.Value = Math.Clamp(
+            _settings.Audio.Enhancement.MaxGainMultiplier,
+            (int)_numMaxGain.Minimum,
+            (int)_numMaxGain.Maximum);
         UpdateEnhancementControls();
         if (!string.IsNullOrEmpty(_settings.DefaultEndpointId))
         {
@@ -909,8 +951,17 @@ public sealed class MainForm : Form
     {
         _trkEnhancement.Enabled = _chkEnhancement.Checked;
         _lblEnhanceStrength.Enabled = _chkEnhancement.Checked;
+        _numMaxGain.Enabled = _chkEnhancement.Checked;
+        _lblMaxGain.Enabled = _chkEnhancement.Checked;
         _lblEnhanceValue.Text = _trkEnhancement.Value.ToString();
         _lblEnhanceValue.ForeColor = _chkEnhancement.Checked ? Color.DarkBlue : Color.DimGray;
+        var highGain = _numMaxGain.Value > 8 || _trkEnhancement.Value >= 75;
+        var veryHighGain = _numMaxGain.Value >= 30;
+        _lblGainWarning.Text = _chkEnhancement.Checked && highGain
+            ? (veryHighGain
+                ? "提示:超高增益仅适合安静弱麦,会强放大噪声/喷麦/环境声"
+                : "提示:高增益主要提升弱麦克风,会放大背景噪声")
+            : string.Empty;
     }
 
     private bool TrySaveSettings()

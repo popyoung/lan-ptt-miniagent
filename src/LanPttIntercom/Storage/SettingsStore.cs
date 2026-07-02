@@ -85,6 +85,10 @@ public sealed class SettingsStore
                 loaded.ListenPort = Clamp(loaded.ListenPort, 1024, 65535);
                 loaded.Ui.OutputVolume = Clamp(loaded.Ui.OutputVolume, 0, 100);
                 loaded.Audio.Enhancement.Strength = Clamp(loaded.Audio.Enhancement.Strength, 0, 100);
+                loaded.Audio.Enhancement.MaxGainMultiplier = Clamp(
+                    loaded.Audio.Enhancement.MaxGainMultiplier,
+                    AudioEnhancementSettings.MinMaxGainMultiplier,
+                    AudioEnhancementSettings.MaxMaxGainMultiplier);
                 return loaded;
             }
             catch (Exception ex)
