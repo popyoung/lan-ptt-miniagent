@@ -163,6 +163,17 @@ public static class AudioLabRunner
                 .ToArray(),
             presetCount = presets.Count,
             presetNames = presets.Select(p => p.Name).ToArray(),
+            presets = presets.Select(p => new
+            {
+                p.Name,
+                p.Strength,
+                p.MaxGainMultiplier,
+                p.ProfileSummary,
+                p.RawProfileJson,
+                outputFileName = outputPaths.TryGetValue(p.Name, out var outputPath)
+                    ? Path.GetRelativePath(experimentDirectory, outputPath)
+                    : string.Empty
+            }).ToArray(),
             toolVersion = typeof(AudioLabRunner).Assembly.GetName().Version?.ToString() ?? "unknown"
         };
         var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };

@@ -19,6 +19,15 @@ public sealed record AudioEnhancementProfile
     public double PlosiveInputRmsThreshold { get; init; } = 0.08;
     public double PlosiveFilteredRatioThreshold { get; init; } = 0.65;
     public double PlosiveOutputRmsCeiling { get; init; } = 0.65;
+    public double DynamicLowMidSuppressionStrengthThreshold { get; init; } = 35.0;
+    public double DynamicLowMidSuppressionLowHz { get; init; } = 90.0;
+    public double DynamicLowMidSuppressionHighHz { get; init; } = 420.0;
+    public double DynamicLowMidSuppressionRatioThreshold { get; init; } = 0.45;
+    public double DynamicLowMidSuppressionMaxReductionDbAt100 { get; init; } = 16.0;
+    public double DynamicLowMidSuppressionCompensationDbAt100 { get; init; } = 2.0;
+    public double DynamicLowMidSuppressionAttackSeconds { get; init; } = 0.040;
+    public double DynamicLowMidSuppressionReleaseSeconds { get; init; } = 0.120;
+    public double DynamicLowMidSuppressionMinInputRms { get; init; } = 0.015;
     public double LimiterThresholdDb { get; init; } = -2.0;
     public double LimiterRatio { get; init; } = 20.0;
     public double LimiterAttackSeconds { get; init; } = 0.002;

@@ -5,6 +5,8 @@ namespace LanPttAudioLab.Metrics;
 
 public static class HtmlReportWriter
 {
+    private const int NearCeilingWarningThreshold = 100;
+
     public static void Write(
         string path,
         string runType,
@@ -20,7 +22,7 @@ public static class HtmlReportWriter
         var html = new StringBuilder();
         html.AppendLine("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">");
         html.AppendLine("<title>LanPttAudioLab Report</title>");
-        html.AppendLine("<style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;margin:24px;line-height:1.45}table{border-collapse:collapse;margin:12px 0;width:100%}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left}code{background:#eee;padding:1px 3px}section{margin-bottom:28px}audio{width:100%;max-width:720px}</style>");
+        html.AppendLine("<style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;margin:24px;line-height:1.45}table{border-collapse:collapse;margin:12px 0;width:100%}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}code{background:#eee;padding:1px 3px}pre{white-space:pre-wrap;margin:0}.warning{border:2px solid #b00020;background:#fff1f1;padding:12px 16px}.warning h2{color:#b00020;margin-top:0}section{margin-bottom:28px}audio{width:100%;max-width:720px}</style>");
         html.AppendLine("</head><body>");
         html.AppendLine("<h1>LanPttAudioLab 报告</h1>");
         html.AppendLine("<p>Run type: <code>" + H(runType) + "</code></p>");
@@ -35,12 +37,28 @@ public static class HtmlReportWriter
         }
         html.AppendLine("</section>");
 
-        html.AppendLine("<section><h2>预设摘要</h2><table><thead><tr><th>name</th><th>strength</th><th>maxGainMultiplier</th><th>profile</th></tr></thead><tbody>");
+        html.AppendLine("<section><h2>预设与增强配置</h2><table><thead><tr><th>预设名称</th><th>强度</th><th>最大增益倍数</th><th>配置摘要</th><th>原始配置 JSON</th></tr></thead><tbody>");
         foreach (var preset in presets)
         {
-            html.AppendLine("<tr><td>" + H(preset.Name) + "</td><td>" + preset.Strength + "</td><td>" + preset.MaxGainMultiplier + "</td><td>" + H(preset.ProfileSummary) + "</td></tr>");
+            html.AppendLine("<tr><td>" + H(preset.Name) + "</td><td>" + preset.Strength + "</td><td>" + preset.MaxGainMultiplier + "</td><td>" + H(preset.ProfileSummary) + "</td><td><pre><code>" + H(preset.RawProfileJson) + "</code></pre></td></tr>");
         }
         html.AppendLine("</tbody></table></section>");
+
+        var nearCeilingWarnings = commonMetrics
+            .Where(m => !string.Equals(m.Name, "raw", StringComparison.OrdinalIgnoreCase) &&
+                m.NearCeilingCount > NearCeilingWarningThreshold)
+            .ToArray();
+        if (nearCeilingWarnings.Length > 0)
+        {
+            html.AppendLine("<section class=\"warning\"><h2>接近削顶风险提示</h2>");
+            html.AppendLine("<p>一个或多个增强预设的接近削顶样本数超过 " + NearCeilingWarningThreshold + "。请复核削顶风险，并考虑降低动态补偿、最大增益倍数、增强强度或限制器阈值。</p>");
+            html.AppendLine("<ul>");
+            foreach (var metrics in nearCeilingWarnings)
+            {
+                html.AppendLine("<li>" + H(metrics.Name) + " 接近削顶样本数=" + metrics.NearCeilingCount + "</li>");
+            }
+            html.AppendLine("</ul></section>");
+        }
 
         html.AppendLine("<section><h2>通用增强指标</h2><table><thead><tr><th>name</th><th>RMS</th><th>Peak</th><th>near-ceiling</th><th>frame RMS mean</th><th>envelope ratio</th><th>low-energy ratio</th></tr></thead><tbody>");
         foreach (var metrics in commonMetrics)

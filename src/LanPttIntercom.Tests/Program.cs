@@ -16,11 +16,14 @@ var tests = new (string Name, Action Run)[]
     ("SettingsStore clamps enhancement max gain multiplier", SettingsStoreClampsEnhancementMaxGainMultiplier),
     ("AudioEnhancementProfile default matches current production constants", AudioEnhancementProfileDefaultMatchesProductionConstants),
     ("AudioLab profile overlay only changes provided fields", AudioLabProfileOverlayOnlyChangesProvidedFields),
+    ("AudioLab profile overlay configures dynamic low-mid suppression", AudioLabProfileOverlayConfiguresDynamicLowMidSuppression),
     ("AudioLab profile overlay rejects unknown fields", AudioLabProfileOverlayRejectsUnknownFields),
     ("AudioLab preset save preserves profile overlay JSON", AudioLabPresetSavePreservesProfileOverlayJson),
     ("AudioLab preset save omits obsolete recording seconds", AudioLabPresetSaveOmitsObsoleteRecordingSeconds),
     ("AudioLab recording frame length keeps preset value until UI edits", AudioLabRecordingFrameLengthKeepsPresetValueUntilUiEdits),
     ("AudioLab runner writes raw and output references to run metadata", AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata),
+    ("AudioLab runner records dynamic profile preset details", AudioLabRunnerRecordsDynamicProfilePresetDetails),
+    ("AudioLab HTML report shows profile details and near-ceiling warning", AudioLabHtmlReportShowsProfileDetailsAndNearCeilingWarning),
     ("WavFile round-trips PCM16 mono samples", WavFileRoundTripsPcm16MonoSamples),
     ("AudioMetrics calculates basic PCM16 values", AudioMetricsCalculatesBasicPcm16Values),
     ("PitchSweepAnalyzer segments voiced regions and estimates pitch", PitchSweepAnalyzerSegmentsVoicedRegionsAndEstimatesPitch),
@@ -40,6 +43,15 @@ var tests = new (string Name, Action Run)[]
     ("VoiceEnhancer strength one hundred keeps plosive protection moderate", VoiceEnhancerStrengthOneHundredKeepsPlosiveProtectionModerate),
     ("VoiceEnhancer low-frequency dominant gain cap is gentle", VoiceEnhancerLowFrequencyDominantGainCapIsGentle),
     ("VoiceEnhancer cascade boundary avoids abrupt low-frequency drop", VoiceEnhancerCascadeBoundaryAvoidsAbruptLowFrequencyDrop),
+    ("VoiceEnhancer default dynamic low-mid suppression lowers pitch low-frequency ratio", VoiceEnhancerDefaultDynamicLowMidSuppressionLowersPitchLowFrequencyRatio),
+    ("VoiceEnhancer dynamic low-mid suppression preserves strong high-pass profile RMS", VoiceEnhancerDynamicLowMidSuppressionPreservesStrongHighPassProfileRms),
+    ("VoiceEnhancer dynamic low-mid compensation avoids strong high-pass peak pressure", VoiceEnhancerDynamicLowMidCompensationAvoidsStrongHighPassPeakPressure),
+    ("VoiceEnhancer dynamic low-mid suppression releases after normal speech returns", VoiceEnhancerDynamicLowMidSuppressionReleasesAfterNormalSpeechReturns),
+    ("VoiceEnhancer dynamic low-mid suppression pauses for plosive protection and restores", VoiceEnhancerDynamicLowMidSuppressionPausesForPlosiveProtectionAndRestores),
+    ("VoiceEnhancer dynamic low-mid suppression survives consecutive plosive frames", VoiceEnhancerDynamicLowMidSuppressionSurvivesConsecutivePlosiveFrames),
+    ("VoiceEnhancer dynamic low-mid extreme profile avoids clipping", VoiceEnhancerDynamicLowMidExtremeProfileAvoidsClipping),
+    ("VoiceEnhancer dynamically suppresses low-mid dominant frames", VoiceEnhancerDynamicallySuppressesLowMidDominantFrames),
+    ("VoiceEnhancer dynamic low-mid suppression preserves 1kHz speech energy", VoiceEnhancerDynamicLowMidSuppressionPreservesOneKilohertzSpeechEnergy),
     ("VoiceEnhancer strength zero preserves low male fundamental", VoiceEnhancerStrengthZeroPreservesLowMaleFundamental),
     ("VoiceEnhancer strength one hundred preserves mid-frequency speech energy", VoiceEnhancerStrengthOneHundredPreservesMidFrequencySpeechEnergy),
     ("VoiceEnhancer rejects non PCM16 mono settings clearly", VoiceEnhancerRejectsNonPcm16MonoClearly),
@@ -178,6 +190,15 @@ static void AudioEnhancementProfileDefaultMatchesProductionConstants()
     AssertEqual(0.08, profile.PlosiveInputRmsThreshold, "default plosive input RMS threshold");
     AssertEqual(0.65, profile.PlosiveFilteredRatioThreshold, "default plosive filtered ratio threshold");
     AssertEqual(0.65, profile.PlosiveOutputRmsCeiling, "default plosive output RMS ceiling");
+    AssertEqual(35.0, profile.DynamicLowMidSuppressionStrengthThreshold, "default dynamic low-mid strength threshold");
+    AssertEqual(90.0, profile.DynamicLowMidSuppressionLowHz, "default dynamic low-mid low Hz");
+    AssertEqual(420.0, profile.DynamicLowMidSuppressionHighHz, "default dynamic low-mid high Hz");
+    AssertEqual(0.45, profile.DynamicLowMidSuppressionRatioThreshold, "default dynamic low-mid ratio threshold");
+    AssertEqual(16.0, profile.DynamicLowMidSuppressionMaxReductionDbAt100, "default dynamic low-mid max reduction");
+    AssertEqual(2.0, profile.DynamicLowMidSuppressionCompensationDbAt100, "default dynamic low-mid compensation");
+    AssertEqual(0.040, profile.DynamicLowMidSuppressionAttackSeconds, "default dynamic low-mid attack");
+    AssertEqual(0.120, profile.DynamicLowMidSuppressionReleaseSeconds, "default dynamic low-mid release");
+    AssertEqual(0.015, profile.DynamicLowMidSuppressionMinInputRms, "default dynamic low-mid minimum input RMS");
     AssertEqual(-2.0, profile.LimiterThresholdDb, "default limiter threshold");
     AssertEqual(20.0, profile.LimiterRatio, "default limiter ratio");
     AssertEqual(0.002, profile.LimiterAttackSeconds, "default limiter attack");
@@ -194,6 +215,34 @@ static void AudioLabProfileOverlayOnlyChangesProvidedFields()
     AssertEqual(0.75, profile.PlosiveOutputRmsCeiling, "overlay plosive output RMS ceiling");
     AssertEqual(AudioEnhancementProfile.Default.PresenceCenterHz, profile.PresenceCenterHz, "overlay should preserve unspecified presence center");
     AssertEqual(AudioEnhancementProfile.Default.OutputCeiling, profile.OutputCeiling, "overlay should preserve unspecified output ceiling");
+}
+
+static void AudioLabProfileOverlayConfiguresDynamicLowMidSuppression()
+{
+    using var document = JsonDocument.Parse(
+        "{" +
+        "\"dynamicLowMidSuppressionStrengthThreshold\":45," +
+        "\"dynamicLowMidSuppressionLowHz\":130," +
+        "\"dynamicLowMidSuppressionHighHz\":390," +
+        "\"dynamicLowMidSuppressionRatioThreshold\":0.52," +
+        "\"dynamicLowMidSuppressionMaxReductionDbAt100\":8," +
+        "\"dynamicLowMidSuppressionCompensationDbAt100\":2.5," +
+        "\"dynamicLowMidSuppressionAttackSeconds\":0.02," +
+        "\"dynamicLowMidSuppressionReleaseSeconds\":0.18," +
+        "\"dynamicLowMidSuppressionMinInputRms\":0.025" +
+        "}");
+    var profile = AudioLabPresetParser.ParseProfile(document.RootElement);
+
+    AssertEqual(45.0, profile.DynamicLowMidSuppressionStrengthThreshold, "overlay dynamic low-mid strength threshold");
+    AssertEqual(130.0, profile.DynamicLowMidSuppressionLowHz, "overlay dynamic low-mid low Hz");
+    AssertEqual(390.0, profile.DynamicLowMidSuppressionHighHz, "overlay dynamic low-mid high Hz");
+    AssertEqual(0.52, profile.DynamicLowMidSuppressionRatioThreshold, "overlay dynamic low-mid ratio threshold");
+    AssertEqual(8.0, profile.DynamicLowMidSuppressionMaxReductionDbAt100, "overlay dynamic low-mid max reduction");
+    AssertEqual(2.5, profile.DynamicLowMidSuppressionCompensationDbAt100, "overlay dynamic low-mid compensation");
+    AssertEqual(0.02, profile.DynamicLowMidSuppressionAttackSeconds, "overlay dynamic low-mid attack");
+    AssertEqual(0.18, profile.DynamicLowMidSuppressionReleaseSeconds, "overlay dynamic low-mid release");
+    AssertEqual(0.025, profile.DynamicLowMidSuppressionMinInputRms, "overlay dynamic low-mid minimum input RMS");
+    AssertEqual(AudioEnhancementProfile.Default.HighPassBaseHz, profile.HighPassBaseHz, "overlay should preserve unspecified high-pass base");
 }
 
 static void AudioLabProfileOverlayRejectsUnknownFields()
@@ -322,6 +371,96 @@ static void AudioLabRunnerWritesRawAndOutputReferencesToRunMetadata()
         AssertEqual(1, root.GetProperty("presetCount").GetInt32(), "metadata preset count");
         AssertEqual("default-50-8", root.GetProperty("presetNames")[0].GetString(), "metadata preset name");
         AssertEqual("outputs/default-50-8.wav", root.GetProperty("outputsFileNames")[0].GetString()?.Replace('\\', '/'), "metadata output file name");
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void AudioLabRunnerRecordsDynamicProfilePresetDetails()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        WavFile.WritePcm16Mono(Path.Combine(dir, "raw.wav"), 16000, MakeSineSamples(16000, 1.0, 180, 9000));
+        File.WriteAllText(Path.Combine(dir, "lab-presets.json"),
+            "{\"recording\":{\"sampleRate\":16000,\"bitsPerSample\":16,\"channels\":1,\"frameMilliseconds\":20,\"inputDeviceId\":-1},\"presets\":[{\"name\":\"dynamic-lowmid-regression\",\"strength\":100,\"maxGainMultiplier\":30,\"profile\":{\"dynamicLowMidSuppressionStrengthThreshold\":0,\"dynamicLowMidSuppressionRatioThreshold\":0.32,\"dynamicLowMidSuppressionMaxReductionDbAt100\":18,\"dynamicLowMidSuppressionCompensationDbAt100\":8,\"dynamicLowMidSuppressionLowHz\":80,\"dynamicLowMidSuppressionHighHz\":430}}]}",
+            System.Text.Encoding.UTF8);
+
+        var result = AudioLabRunner.RunAllPresets(dir, AudioLabRunner.SpeechQuality);
+
+        Assert(File.Exists(result.OutputPaths["dynamic-lowmid-regression"]), "dynamic preset output wav should exist");
+        Assert(File.Exists(Path.Combine(dir, "metrics.csv")), "metrics.csv should exist");
+        Assert(File.Exists(Path.Combine(dir, "plosive-metrics.csv")), "plosive metrics should exist");
+        Assert(File.Exists(result.ReportPath), "report.html should exist");
+
+        using var metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "run-type.json"), System.Text.Encoding.UTF8));
+        var preset = metadata.RootElement.GetProperty("presets")[0];
+        AssertEqual("dynamic-lowmid-regression", preset.GetProperty("name").GetString(), "metadata preset name");
+        AssertEqual(100, preset.GetProperty("strength").GetInt32(), "metadata preset strength");
+        AssertEqual(30, preset.GetProperty("maxGainMultiplier").GetInt32(), "metadata preset max gain");
+        Assert(preset.GetProperty("profileSummary").GetString()?.Contains("dynamicLowMidSuppressionCompensationDbAt100=8") == true, "metadata profile summary should include dynamic compensation");
+        Assert(preset.GetProperty("rawProfileJson").GetString()?.Contains("\"dynamicLowMidSuppressionMaxReductionDbAt100\":18") == true, "metadata raw profile JSON should preserve dynamic max reduction");
+
+        var report = File.ReadAllText(result.ReportPath, System.Text.Encoding.UTF8);
+        Assert(report.Contains("dynamicLowMidSuppressionCompensationDbAt100=8"), "report should include dynamic profile summary");
+        Assert(report.Contains("dynamicLowMidSuppressionMaxReductionDbAt100"), "report should include raw dynamic profile JSON");
+    }
+    finally
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+}
+
+static void AudioLabHtmlReportShowsProfileDetailsAndNearCeilingWarning()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "LanPttAudioLab.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    try
+    {
+        var rawPath = Path.Combine(dir, "raw.wav");
+        var outputPath = Path.Combine(dir, "risk.wav");
+        WavFile.WritePcm16Mono(rawPath, 16000, MakeSineSamples(16000, 0.1, 220, 1000));
+        WavFile.WritePcm16Mono(outputPath, 16000, MakeSineSamples(16000, 0.1, 220, 1000));
+
+        var preset = new AudioLabPreset(
+            "risk<preset>",
+            100,
+            30,
+            AudioEnhancementProfile.Default,
+            "dynamicLowMidSuppressionCompensationDbAt100=12, limiterThresholdDb=-1",
+            "{\"dynamicLowMidSuppressionCompensationDbAt100\":12,\"limiterThresholdDb\":-1}");
+        var metrics = new[]
+        {
+            new AudioMetricSummary("raw", 1000, 30000, 1000, new[] { 1000.0 }, 0, 1000, 1000, 1000),
+            new AudioMetricSummary("risk<preset>", 12000, 30000, 101, new[] { 12000.0 }, 0, 12000, 12000, 12000)
+        };
+        var reportPath = Path.Combine(dir, "report.html");
+
+        HtmlReportWriter.Write(
+            reportPath,
+            AudioLabRunner.SpeechQuality,
+            rawPath,
+            new Dictionary<string, string> { ["risk<preset>"] = outputPath },
+            new[] { preset },
+            metrics,
+            Array.Empty<PlosiveMetric>(),
+            Array.Empty<PitchMetricRow>(),
+            0);
+
+        var report = File.ReadAllText(reportPath, System.Text.Encoding.UTF8);
+        Assert(report.Contains("risk&lt;preset&gt;"), "report should HTML-encode preset names");
+        Assert(report.Contains("预设与增强配置"), "report should show merged Chinese preset/profile section title");
+        Assert(!report.Contains("<h2>预设摘要</h2>"), "report should not keep duplicate preset summary section");
+        Assert(!report.Contains("<h2>增强配置详情</h2>"), "report should not keep duplicate profile details section");
+        Assert(report.Contains("接近削顶风险提示"), "report should show Chinese near-ceiling warning");
+        Assert(report.Contains(".warning h2{color:#b00020"), "report should emphasize warning title style");
+        Assert(report.Contains("risk&lt;preset&gt; 接近削顶样本数=101"), "warning should identify risky preset and count in Chinese");
+        Assert(!report.Contains("raw 接近削顶样本数=1000"), "raw near-ceiling should not trigger preset warning");
+        Assert(report.Contains("dynamicLowMidSuppressionCompensationDbAt100=12"), "report should show profile summary");
+        Assert(report.Contains("&quot;dynamicLowMidSuppressionCompensationDbAt100&quot;:12"), "report should HTML-encode raw profile JSON");
     }
     finally
     {
@@ -749,6 +888,428 @@ static void VoiceEnhancerCascadeBoundaryAvoidsAbruptLowFrequencyDrop()
     Assert(ratio51 <= ratio49 * 1.5, "strength 51 should remain in the same low-frequency behavior band as strength 49; strength49 ratio " + ratio49 + ", strength51 ratio " + ratio51);
 }
 
+static void VoiceEnhancerDefaultDynamicLowMidSuppressionLowersPitchLowFrequencyRatio()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 14 }
+    };
+    var disabledEnhancer = new VoiceEnhancer(audio, AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 0
+    });
+    var suppressedEnhancer = new VoiceEnhancer(audio, AudioEnhancementProfile.Default);
+    var disabled = Array.Empty<byte>();
+    var suppressed = Array.Empty<byte>();
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var input = MakeCompositeSineFrame(
+            audio.FrameSamples,
+            startSample: frame * audio.FrameSamples,
+            (120, 5200),
+            (180, 4600),
+            (700, 900),
+            (1200, 900),
+            (2200, 500));
+        disabled = disabledEnhancer.ProcessPcm16Mono(input);
+        suppressed = suppressedEnhancer.ProcessPcm16Mono(input);
+    }
+
+    var disabledLowRatio = PitchLowFrequencyRatioPcm16(disabled);
+    var suppressedLowRatio = PitchLowFrequencyRatioPcm16(suppressed);
+
+    Assert(suppressedLowRatio < disabledLowRatio * 0.82, "default dynamic suppression should materially lower pitch low-frequency ratio; disabled " + disabledLowRatio + ", suppressed " + suppressedLowRatio);
+    Assert(PeakPcm16(suppressed) <= PeakPcm16(disabled), "default dynamic suppression should not increase peak pressure on low-frequency-dominant frames");
+}
+
+static void VoiceEnhancerDynamicLowMidSuppressionPreservesStrongHighPassProfileRms()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 16 }
+    };
+    var brightProfile = AudioEnhancementProfile.Default with
+    {
+        HighPassBaseHz = 205,
+        HighPassStrengthSlopeHz = 2.15,
+        PresenceCenterHz = 3000,
+        PresenceQ = 0.85,
+        PresenceGainDbAt100 = 8.5,
+        TargetRmsAt100 = 0.168,
+        MakeupGainAt100 = 1.58,
+        PlosiveStrengthThreshold = 70,
+        PlosiveInputRmsThreshold = 0.07,
+        PlosiveFilteredRatioThreshold = 0.7,
+        PlosiveOutputRmsCeiling = 0.32,
+        LimiterThresholdDb = -2.5
+    };
+    var input = MakeCompositeSineFrame(
+        audio.FrameSamples,
+        startSample: 0,
+        (180, 3600),
+        (240, 3200),
+        (700, 1400),
+        (1200, 1200),
+        (3000, 700));
+    var disabled = VoiceEnhancer.ProcessPcm16Mono(input, audio, brightProfile with
+    {
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 0
+    });
+    var suppressed = VoiceEnhancer.ProcessPcm16Mono(input, audio, brightProfile);
+    var disabledRms = RmsPcm16(disabled);
+    var suppressedRms = RmsPcm16(suppressed);
+
+    Assert(suppressedRms >= disabledRms * 0.92, "dynamic suppression should not act like global attenuation on strong high-pass profile; disabled RMS " + disabledRms + ", suppressed RMS " + suppressedRms);
+}
+
+static void VoiceEnhancerDynamicLowMidCompensationAvoidsStrongHighPassPeakPressure()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 16 }
+    };
+    var brightProfile = AudioEnhancementProfile.Default with
+    {
+        HighPassBaseHz = 205,
+        HighPassStrengthSlopeHz = 2.15,
+        PresenceCenterHz = 3000,
+        PresenceQ = 0.85,
+        PresenceGainDbAt100 = 8.5,
+        TargetRmsAt100 = 0.168,
+        MakeupGainAt100 = 1.58,
+        PlosiveStrengthThreshold = 70,
+        PlosiveInputRmsThreshold = 0.07,
+        PlosiveFilteredRatioThreshold = 0.7,
+        PlosiveOutputRmsCeiling = 0.32,
+        LimiterThresholdDb = -2.5
+    };
+    var disabledEnhancer = new VoiceEnhancer(audio, brightProfile with
+    {
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 0
+    });
+    var dynamicEnhancer = new VoiceEnhancer(audio, brightProfile);
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var warmup = MakeCompositeSineFrame(
+            audio.FrameSamples,
+            frame * audio.FrameSamples,
+            (180, 3600),
+            (240, 3200),
+            (700, 1400),
+            (1200, 1200),
+            (3000, 700));
+        _ = disabledEnhancer.ProcessPcm16Mono(warmup);
+        _ = dynamicEnhancer.ProcessPcm16Mono(warmup);
+    }
+
+    var peakFrame = MakeCompositeSineFrame(
+        audio.FrameSamples,
+        startSample: 8 * audio.FrameSamples,
+        (180, 9000),
+        (240, 7500),
+        (700, 4200),
+        (1200, 3600),
+        (3000, 2200));
+    var disabled = disabledEnhancer.ProcessPcm16Mono(peakFrame);
+    var dynamic = dynamicEnhancer.ProcessPcm16Mono(peakFrame);
+    var disabledPeak = PeakPcm16(disabled);
+    var dynamicPeak = PeakPcm16(dynamic);
+    var disabledNearCeiling = NearCeilingCountPcm16(disabled);
+    var dynamicNearCeiling = NearCeilingCountPcm16(dynamic);
+
+    Assert(dynamicPeak <= Math.Max(disabledPeak + 800, 29500), "dynamic compensation should not materially raise strong high-pass peak pressure; disabled peak " + disabledPeak + ", dynamic peak " + dynamicPeak);
+    Assert(dynamicNearCeiling <= disabledNearCeiling + 2, "dynamic compensation should not materially add near-ceiling samples; disabled " + disabledNearCeiling + ", dynamic " + dynamicNearCeiling);
+}
+
+static void VoiceEnhancerDynamicLowMidSuppressionReleasesAfterNormalSpeechReturns()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 8 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionRatioThreshold = 0.40,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 12,
+        DynamicLowMidSuppressionCompensationDbAt100 = 2,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.040,
+        DynamicLowMidSuppressionMinInputRms = 0.001
+    };
+    var dynamicEnhancer = new VoiceEnhancer(audio, profile);
+    var disabledEnhancer = new VoiceEnhancer(audio, profile with { DynamicLowMidSuppressionMaxReductionDbAt100 = 0 });
+
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var lowRich = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5000), (1000, 800));
+        _ = dynamicEnhancer.ProcessPcm16Mono(lowRich);
+        _ = disabledEnhancer.ProcessPcm16Mono(lowRich);
+    }
+
+    var dynamicNormal = Array.Empty<byte>();
+    var disabledNormal = Array.Empty<byte>();
+    for (int frame = 8; frame < 20; frame++)
+    {
+        var normalSpeech = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (1000, 4200), (2200, 1400));
+        dynamicNormal = dynamicEnhancer.ProcessPcm16Mono(normalSpeech);
+        disabledNormal = disabledEnhancer.ProcessPcm16Mono(normalSpeech);
+    }
+
+    var dynamicRms = RmsPcm16(dynamicNormal);
+    var disabledRms = RmsPcm16(disabledNormal);
+
+    Assert(dynamicRms >= disabledRms * 0.95, "dynamic low-mid release should restore normal speech RMS; disabled RMS " + disabledRms + ", dynamic RMS " + dynamicRms);
+    Assert(dynamicRms <= disabledRms * 1.08, "dynamic low-mid release should not overshoot normal speech RMS; disabled RMS " + disabledRms + ", dynamic RMS " + dynamicRms);
+}
+
+static void VoiceEnhancerDynamicLowMidSuppressionPausesForPlosiveProtectionAndRestores()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 8 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionRatioThreshold = 0.40,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 12,
+        DynamicLowMidSuppressionCompensationDbAt100 = 2,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.050,
+        DynamicLowMidSuppressionMinInputRms = 0.001
+    };
+    var dynamicEnhancer = new VoiceEnhancer(audio, profile);
+    var disabledEnhancer = new VoiceEnhancer(audio, profile with { DynamicLowMidSuppressionMaxReductionDbAt100 = 0 });
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var lowRich = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5000), (1000, 800));
+        _ = dynamicEnhancer.ProcessPcm16Mono(lowRich);
+        _ = disabledEnhancer.ProcessPcm16Mono(lowRich);
+    }
+
+    var burst = MakeBurstFrame(audio.FrameSamples, frequencyHz: 120, amplitude: 18000, activeSamples: audio.FrameSamples / 4);
+    var dynamicBurst = dynamicEnhancer.ProcessPcm16Mono(burst);
+    var disabledBurst = disabledEnhancer.ProcessPcm16Mono(burst);
+    var dynamicBurstRms = RmsPcm16(dynamicBurst);
+    var disabledBurstRms = RmsPcm16(disabledBurst);
+
+    Assert(PeakPcm16(dynamicBurst) <= PeakPcm16(disabledBurst) + 800, "dynamic pause during plosive protection should not raise burst peak");
+    Assert(dynamicBurstRms >= disabledBurstRms * 0.90, "dynamic pause during plosive protection should not create burst dropout; disabled RMS " + disabledBurstRms + ", dynamic RMS " + dynamicBurstRms);
+
+    var dynamicLowRich = Array.Empty<byte>();
+    var disabledLowRich = Array.Empty<byte>();
+    for (int frame = 9; frame < 17; frame++)
+    {
+        var lowRich = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5000), (1000, 800));
+        dynamicLowRich = dynamicEnhancer.ProcessPcm16Mono(lowRich);
+        disabledLowRich = disabledEnhancer.ProcessPcm16Mono(lowRich);
+    }
+
+    var dynamicLowMagnitude = GoertzelMagnitudePcm16(dynamicLowRich, 180);
+    var disabledLowMagnitude = GoertzelMagnitudePcm16(disabledLowRich, 180);
+
+    Assert(dynamicLowMagnitude < disabledLowMagnitude * 0.80, "dynamic low-mid suppression should restore after plosive frame; disabled " + disabledLowMagnitude + ", dynamic " + dynamicLowMagnitude);
+}
+
+static void VoiceEnhancerDynamicLowMidSuppressionSurvivesConsecutivePlosiveFrames()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 8 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionRatioThreshold = 0.40,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 12,
+        DynamicLowMidSuppressionCompensationDbAt100 = 2,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.050,
+        DynamicLowMidSuppressionMinInputRms = 0.001
+    };
+    var dynamicEnhancer = new VoiceEnhancer(audio, profile);
+    var disabledEnhancer = new VoiceEnhancer(audio, profile with { DynamicLowMidSuppressionMaxReductionDbAt100 = 0 });
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var lowRich = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5200), (1000, 700));
+        _ = dynamicEnhancer.ProcessPcm16Mono(lowRich);
+        _ = disabledEnhancer.ProcessPcm16Mono(lowRich);
+    }
+
+    for (int frame = 8; frame < 12; frame++)
+    {
+        var burst = MakeBurstFrame(audio.FrameSamples, frequencyHz: 120, amplitude: 22000, activeSamples: audio.FrameSamples / 2);
+        var dynamicBurst = dynamicEnhancer.ProcessPcm16Mono(burst);
+        var disabledBurst = disabledEnhancer.ProcessPcm16Mono(burst);
+        var dynamicBurstRms = RmsPcm16(dynamicBurst);
+        var disabledBurstRms = RmsPcm16(disabledBurst);
+        var dynamicNearCeiling = NearCeilingCountPcm16(dynamicBurst);
+        var disabledNearCeiling = NearCeilingCountPcm16(disabledBurst);
+
+        Assert(dynamicBurstRms >= disabledBurstRms * 0.88, "consecutive plosive frame should not drop out; frame " + frame + ", disabled RMS " + disabledBurstRms + ", dynamic RMS " + dynamicBurstRms);
+        Assert(PeakPcm16(dynamicBurst) <= PeakPcm16(disabledBurst) + 800, "consecutive plosive frame should not raise peak; frame " + frame);
+        Assert(dynamicNearCeiling <= disabledNearCeiling + 2, "consecutive plosive frame should not materially add near-ceiling samples; frame " + frame + ", disabled " + disabledNearCeiling + ", dynamic " + dynamicNearCeiling);
+    }
+
+    var dynamicLowRich = Array.Empty<byte>();
+    var disabledLowRich = Array.Empty<byte>();
+    for (int frame = 12; frame < 22; frame++)
+    {
+        var lowRich = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5200), (1000, 700));
+        dynamicLowRich = dynamicEnhancer.ProcessPcm16Mono(lowRich);
+        disabledLowRich = disabledEnhancer.ProcessPcm16Mono(lowRich);
+    }
+
+    var dynamicLowMagnitude = GoertzelMagnitudePcm16(dynamicLowRich, 180);
+    var disabledLowMagnitude = GoertzelMagnitudePcm16(disabledLowRich, 180);
+    var dynamicRms = RmsPcm16(dynamicLowRich);
+    var disabledRms = RmsPcm16(disabledLowRich);
+
+    Assert(dynamicLowMagnitude < disabledLowMagnitude * 0.80, "dynamic low-mid suppression should recover after consecutive plosives; disabled " + disabledLowMagnitude + ", dynamic " + dynamicLowMagnitude);
+    Assert(dynamicRms > disabledRms * 0.35 && dynamicRms > 5000, "dynamic low-mid suppression should recover without muting speech; disabled RMS " + disabledRms + ", dynamic RMS " + dynamicRms);
+}
+
+static void VoiceEnhancerDynamicLowMidExtremeProfileAvoidsClipping()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 30 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionLowHz = 70,
+        DynamicLowMidSuppressionHighHz = 500,
+        DynamicLowMidSuppressionRatioThreshold = 0.20,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 30,
+        DynamicLowMidSuppressionCompensationDbAt100 = 12,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.005,
+        DynamicLowMidSuppressionMinInputRms = 0.0001,
+        LimiterThresholdDb = -2.5
+    };
+    var enhancer = new VoiceEnhancer(audio, profile);
+    var totalNearCeiling = 0;
+    var maxPeak = 0;
+    var minRms = double.MaxValue;
+
+    for (int frame = 0; frame < 20; frame++)
+    {
+        var input = MakeCompositeSineFrame(
+            audio.FrameSamples,
+            frame * audio.FrameSamples,
+            (160, 5200),
+            (240, 4600),
+            (1000, 1600),
+            (2200, 900));
+        var output = enhancer.ProcessPcm16Mono(input);
+        totalNearCeiling += NearCeilingCountPcm16(output);
+        maxPeak = Math.Max(maxPeak, PeakPcm16(output));
+        minRms = Math.Min(minRms, RmsPcm16(output));
+    }
+
+    Assert(maxPeak <= 31000, "extreme dynamic profile should stay under hard clipping pressure; peak " + maxPeak);
+    Assert(totalNearCeiling <= 20, "extreme dynamic profile should not spend many samples near ceiling; near-ceiling " + totalNearCeiling);
+    Assert(minRms > 1000, "extreme dynamic profile should not collapse frames into dropouts; min RMS " + minRms);
+}
+
+static void VoiceEnhancerDynamicallySuppressesLowMidDominantFrames()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 8 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionRatioThreshold = 0.40,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 10,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.050,
+        DynamicLowMidSuppressionMinInputRms = 0.001
+    };
+    var disabledEnhancer = new VoiceEnhancer(audio, profile with { DynamicLowMidSuppressionMaxReductionDbAt100 = 0 });
+    var suppressedEnhancer = new VoiceEnhancer(audio, profile);
+    var disabled = Array.Empty<byte>();
+    var suppressed = Array.Empty<byte>();
+    for (int frame = 0; frame < 8; frame++)
+    {
+        var input = MakeCompositeSineFrame(audio.FrameSamples, frame * audio.FrameSamples, (180, 5000), (1000, 800));
+        disabled = disabledEnhancer.ProcessPcm16Mono(input);
+        suppressed = suppressedEnhancer.ProcessPcm16Mono(input);
+    }
+
+    var disabledLowMagnitude = GoertzelMagnitudePcm16(disabled, 180);
+    var suppressedLowMagnitude = GoertzelMagnitudePcm16(suppressed, 180);
+
+    var disabledRms = RmsPcm16(disabled);
+    var suppressedRms = RmsPcm16(suppressed);
+
+    Assert(suppressedLowMagnitude < disabledLowMagnitude * 0.75, "low-mid dominant frame should have lower 180Hz energy; disabled " + disabledLowMagnitude + ", suppressed " + suppressedLowMagnitude);
+    Assert(suppressedRms > disabledRms * 0.45, "dynamic suppression should not mute the frame into a dropout; disabled RMS " + disabledRms + ", suppressed RMS " + suppressedRms);
+}
+
+static void VoiceEnhancerDynamicLowMidSuppressionPreservesOneKilohertzSpeechEnergy()
+{
+    var audio = new AudioSettings
+    {
+        SampleRate = 16000,
+        Channels = 1,
+        BitsPerSample = 16,
+        FrameMilliseconds = 20,
+        Enhancement = new AudioEnhancementSettings { Enabled = true, Strength = 100, MaxGainMultiplier = 8 }
+    };
+    var profile = AudioEnhancementProfile.Default with
+    {
+        DynamicLowMidSuppressionStrengthThreshold = 0,
+        DynamicLowMidSuppressionRatioThreshold = 0.40,
+        DynamicLowMidSuppressionMaxReductionDbAt100 = 10,
+        DynamicLowMidSuppressionAttackSeconds = 0.001,
+        DynamicLowMidSuppressionReleaseSeconds = 0.050,
+        DynamicLowMidSuppressionMinInputRms = 0.001
+    };
+    var input = MakeSineFrameAtFrequency(audio.FrameSamples, 1000, 5000);
+    var disabled = VoiceEnhancer.ProcessPcm16Mono(input, audio, profile with { DynamicLowMidSuppressionMaxReductionDbAt100 = 0 });
+    var suppressed = VoiceEnhancer.ProcessPcm16Mono(input, audio, profile);
+    var disabledRms = RmsPcm16(disabled);
+    var suppressedRms = RmsPcm16(suppressed);
+
+    Assert(suppressedRms >= disabledRms * 0.95, "1kHz speech energy should not be materially reduced by dynamic low-mid suppression; disabled RMS " + disabledRms + ", suppressed RMS " + suppressedRms);
+}
+
 static void VoiceEnhancerStrengthZeroPreservesLowMaleFundamental()
 {
     var audio = new AudioSettings
@@ -1151,6 +1712,44 @@ static int PeakPcm16(byte[] data)
         peak = Math.Max(peak, Math.Abs(BitConverter.ToInt16(data, i * 2)));
     }
     return peak;
+}
+
+static int NearCeilingCountPcm16(byte[] data)
+{
+    var count = 0;
+    for (int i = 0; i < data.Length / 2; i++)
+    {
+        if (Math.Abs((int)BitConverter.ToInt16(data, i * 2)) >= 29500)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static double PitchLowFrequencyRatioPcm16(byte[] data)
+{
+    var low = GoertzelMagnitudePcm16(data, 120) + GoertzelMagnitudePcm16(data, 180);
+    var mid = GoertzelMagnitudePcm16(data, 700) + GoertzelMagnitudePcm16(data, 1200);
+    return low / Math.Max(0.0001, low + mid);
+}
+
+static double GoertzelMagnitudePcm16(byte[] data, double frequencyHz)
+{
+    var omega = 2.0 * Math.PI * frequencyHz / 16000.0;
+    var coeff = 2.0 * Math.Cos(omega);
+    var q0 = 0.0;
+    var q1 = 0.0;
+    var q2 = 0.0;
+    for (int i = 0; i < data.Length / 2; i++)
+    {
+        q0 = coeff * q1 - q2 + BitConverter.ToInt16(data, i * 2);
+        q2 = q1;
+        q1 = q0;
+    }
+
+    return Math.Sqrt(q1 * q1 + q2 * q2 - q1 * q2 * coeff);
 }
 
 static void WriteSample(byte[] data, int sampleIndex, short value)
